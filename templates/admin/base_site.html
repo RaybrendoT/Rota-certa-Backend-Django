@@ -1,0 +1,7 @@
+{% extends "admin/base.html" %}
+{% comment %}
+  sidebar-mini: ao recolher pelo botão de menu, o menu lateral vira uma barra só com os ícones
+  (como no painel Angular) em vez de sumir. Fica no servidor para a página já carregar no
+  estado certo quando o cookie "jazzy_menu" do Jazzmin indica menu fechado.
+{% endcomment %}
+{% block bodyclass %}{{ block.super }} sidebar-mini{% endblock %}

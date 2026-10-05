@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.models import (
+    AccessAccount,
     Address,
     Company,
     MeetingPoint,
@@ -195,7 +196,12 @@ class Command(BaseCommand):
         stops_by_route = self.create_route_stops(routes, meeting_points)
         self.create_route_passengers(employees, routes, stops_by_route)
         self.create_route_events(routes)
+        manager = self.create_demo_manager(companies[0])
 
+        self.stdout.write(
+            f"Gestor demo: {manager.access_account.email} "
+            "(senha inicial = matricula + 4 ultimos digitos do telefone; troca obrigatoria no 1o login)"
+        )
         self.stdout.write(
             self.style.SUCCESS(
                 "Seed Manaus concluido: "
@@ -207,6 +213,20 @@ class Command(BaseCommand):
                 f"{RoutePassenger.objects.count()} passageiros de rota."
             )
         )
+
+    def create_demo_manager(self, company):
+        """Funcionario da 1a empresa com perfil MANAGER, para entrar no frontend."""
+        person, _ = Person.objects.update_or_create(
+            company=company,
+            type=Person.PersonType.EMPLOYEE,
+            employee_code="MNG001",
+            defaults={"name": "Maria Gestora", "phone": "92990000001", "is_active": True},
+        )
+        account = person.access_account
+        if account.role != AccessAccount.Role.MANAGER:
+            account.role = AccessAccount.Role.MANAGER
+            account.save(update_fields=["role", "updated_at"])
+        return person
 
     def create_companies(self):
         companies = []

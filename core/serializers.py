@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError
 from .models import (
+    AccessAccount,
     Company,
     Person,
     Route,
@@ -34,6 +35,7 @@ class CompanySerializer(BaseSerializer):
 class PersonSerializer(BaseSerializer):
     auto_email = serializers.SerializerMethodField(read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
+    role = serializers.SerializerMethodField(read_only=True)
 
     class Meta(BaseSerializer.Meta):
         model = Person
@@ -41,6 +43,13 @@ class PersonSerializer(BaseSerializer):
 
     def get_auto_email(self, obj):
         return obj.get_auto_email()
+
+    def get_role(self, obj):
+        """Perfil de acesso da conta; None quando a pessoa ainda não tem conta."""
+        try:
+            return obj.access_account.role
+        except AccessAccount.DoesNotExist:
+            return None
 
     def create(self, validated_data):
         try:
@@ -59,6 +68,14 @@ class PersonSerializer(BaseSerializer):
             return instance
         except DjangoValidationError as e:
             raise ValidationError(e.message_dict)
+
+
+class AccessRoleSerializer(serializers.Serializer):
+    """Corpo de POST people/{id}/access-role/. DRIVER não é atribuível: vem do tipo da pessoa."""
+
+    role = serializers.ChoiceField(
+        choices=[AccessAccount.Role.EMPLOYEE, AccessAccount.Role.MANAGER]
+    )
 
 
 class RouteSerializer(BaseSerializer):

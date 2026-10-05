@@ -7,6 +7,7 @@ from .auth_views import (
     AccessAccountTokenVerifyView,
     ChangePasswordView,
     LoginView,
+    MeView,
     PasswordResetCompleteView,
     PasswordResetRequestView,
     PasswordResetVerifyView,
@@ -44,6 +45,7 @@ urlpatterns = [
     path("auth/login/", LoginView.as_view(), name="auth-login"),
     path("auth/refresh/", AccessAccountTokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", AccessAccountTokenVerifyView.as_view(), name="auth-verify"),
+    path("auth/me/", MeView.as_view(), name="auth-me"),
     path(
         "auth/change-password/",
         ChangePasswordView.as_view(),

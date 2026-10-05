@@ -11,6 +11,36 @@ from .models import AccessAccount, Company, Person
 logger = logging.getLogger(__name__)
 
 
+def sync_access_account_role_for_person(person):
+    """
+    Mantém o perfil coerente com o tipo da pessoa: DRIVER só para motorista.
+    Se o tipo mudar, o perfil acompanha (um gestor que vira motorista deixa de ser gestor).
+    """
+    try:
+        account = AccessAccount.objects.get(person_id=person.pk)
+    except AccessAccount.DoesNotExist:
+        return
+
+    is_driver = person.type == Person.PersonType.DRIVER
+    if is_driver and account.role != AccessAccount.Role.DRIVER:
+        new_role = AccessAccount.Role.DRIVER
+    elif not is_driver and account.role == AccessAccount.Role.DRIVER:
+        new_role = AccessAccount.Role.EMPLOYEE
+    else:
+        return
+
+    logger.info(
+        "AccessAccount id=%s: perfil %s -> %s (tipo da pessoa mudou). person_id=%s.",
+        account.pk,
+        account.role,
+        new_role,
+        person.pk,
+    )
+    account.person = person
+    account.role = new_role
+    account.save(update_fields=["role", "updated_at"])
+
+
 def sync_access_account_email_for_person(person):
     """
     Atualiza AccessAccount.email para coincidir com get_auto_email() da pessoa,
@@ -79,6 +109,7 @@ def _create_access_account_if_missing(instance):
     acc = AccessAccount(
         person=instance,
         email=email,
+        role=AccessAccount.default_role_for(instance),
         must_change_password=True,
     )
     initial = getattr(settings, "ACCESS_ACCOUNT_AUTO_INITIAL_PASSWORD", "") or ""
@@ -110,6 +141,8 @@ def person_post_save_access_account(sender, instance, **kwargs):
 
     if getattr(settings, "ACCESS_ACCOUNT_AUTO_CREATE", True):
         _create_access_account_if_missing(instance)
+
+    sync_access_account_role_for_person(instance)
 
     if getattr(settings, "ACCESS_ACCOUNT_SYNC_EMAIL", True):
         sync_access_account_email_for_person(instance)

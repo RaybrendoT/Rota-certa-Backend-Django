@@ -19,6 +19,7 @@ class PersonBriefSerializer(serializers.Serializer):
     name = serializers.CharField()
     type = serializers.CharField()
     email = serializers.EmailField(source="access_account.email", read_only=True)
+    role = serializers.CharField(source="access_account.role", read_only=True)
     company_id = serializers.IntegerField()
     company_name = serializers.CharField(source="company.name")
 

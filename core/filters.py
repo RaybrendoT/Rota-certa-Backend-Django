@@ -23,10 +23,13 @@ class CompanyFilter(django_filters.FilterSet):
 class PersonFilter(django_filters.FilterSet):
     company_id = django_filters.NumberFilter(field_name="company_id")
     type = django_filters.CharFilter(field_name="type")
+    # Perfil de acesso vive em AccessAccount, não em Person; usado para listar gestores
+    # (?role=MANAGER) e para checar se uma empresa já tem gestor (?company_id=X&role=MANAGER).
+    role = django_filters.CharFilter(field_name="access_account__role")
 
     class Meta:
         model = Person
-        fields = ["company_id", "type", "is_active"]
+        fields = ["company_id", "type", "role", "is_active"]
 
 
 class DriverFilter(django_filters.FilterSet):

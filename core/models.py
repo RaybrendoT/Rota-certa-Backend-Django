@@ -12,20 +12,31 @@ def normalize_email(email):
     return str(email).strip().lower()
 
 
-def derive_email_domain_from_company_name(name: str) -> str:
+def derive_email_domain_from_company_name(name: str, max_length: int = 24) -> str:
     """
-    Gera um domínio estilo samsung.com a partir do nome da empresa
-    (primeira palavra alfanumérica em minúsculas + .com).
+    Gera um domínio estilo samsung.com a partir do nome da empresa: acumula as
+    palavras do nome (em minúsculas, sem acento/pontuação) enquanto couberem em
+    `max_length`. Nomes curtos ("Coca-Cola") saem inteiros ("cocacola.com");
+    nomes com várias palavras param de acumular antes de estourar o limite —
+    nunca corta uma palavra no meio.
     """
     name = (name or "").strip()
     if not name:
         return "empresa.com"
-    parts = re.split(r"[\s.,_-]+", name)
-    first = next((p for p in parts if p), "")
-    slug = re.sub(r"[^a-z0-9]", "", first.lower())
-    if not slug:
-        slug = "empresa"
-    return f"{slug}.com"
+
+    slug = ""
+    for part in re.split(r"[\s.,_-]+", name):
+        piece = re.sub(r"[^a-z0-9]", "", part.lower())
+        if not piece:
+            continue
+        if not slug:
+            slug = piece
+        elif len(slug) + len(piece) <= max_length:
+            slug += piece
+        else:
+            break
+
+    return f"{slug or 'empresa'}.com"
 
 
 def normalize_email_domain(domain: str) -> str:
@@ -40,9 +51,9 @@ class ActiveManager(models.Manager):
 
 class BaseModel(models.Model):
     id = models.BigAutoField(primary_key=True)
-    created_at = models.DateTimeField(default=timezone.now, editable=False)
-    updated_at = models.DateTimeField(auto_now=True)
-    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField("criado em", default=timezone.now, editable=False)
+    updated_at = models.DateTimeField("atualizado em", auto_now=True)
+    is_active = models.BooleanField("ativo", default=True)
 
     objects = models.Manager()
     active = ActiveManager()
@@ -51,13 +62,18 @@ class BaseModel(models.Model):
         abstract = True
 
 class Company(BaseModel):
-    name = models.CharField(max_length=255)
+    name = models.CharField("nome", max_length=255)
     email_domain = models.CharField(
+        "domínio de e-mail",
         max_length=255,
         blank=True,
         help_text="Domínio dos e-mails automáticos, ex: samsung.com (sem @). "
         "Vazio = derivado do nome da empresa.",
     )
+
+    class Meta:
+        verbose_name = "empresa"
+        verbose_name_plural = "empresas"
 
     def clean(self):
         super().clean()
@@ -80,21 +96,29 @@ class Company(BaseModel):
 
 class Person(BaseModel):
     class PersonType(models.TextChoices):
-        DRIVER = "DRIVER", "Driver"
-        EMPLOYEE = "EMPLOYEE", "Employee"
+        DRIVER = "DRIVER", "Motorista"
+        EMPLOYEE = "EMPLOYEE", "Funcionário"
 
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="people")
-    name = models.CharField(max_length=255)
-    phone = models.CharField(max_length=30)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="people", verbose_name="empresa")
+    name = models.CharField("nome", max_length=255)
+    phone = models.CharField("telefone", max_length=30)
 
     type = models.CharField(
+        "tipo",
         max_length=20,
         choices=PersonType.choices,
         db_index=True,
     )
 
-    license_number = models.CharField(max_length=100, null=True, blank=True)   # só driver
-    employee_code = models.CharField(max_length=100, null=True, blank=True)    # só employee
+    license_number = models.CharField("CNH", max_length=100, null=True, blank=True)   # só driver
+    employee_code = models.CharField("matrícula", max_length=100, null=True, blank=True)    # só employee
+
+    class Meta:
+        verbose_name = "pessoa"
+        verbose_name_plural = "pessoas"
+
+    def __str__(self):
+        return self.name
 
     def clean(self):
         if self.type == self.PersonType.DRIVER:
@@ -136,38 +160,89 @@ class Person(BaseModel):
 
 
 class AccessAccount(BaseModel):
+    class Role(models.TextChoices):
+        DRIVER = "DRIVER", "Motorista"
+        EMPLOYEE = "EMPLOYEE", "Funcionário"
+        MANAGER = "MANAGER", "Gestor"
+        GERENTE = "GERENTE", "Gerente"
+
     person = models.OneToOneField(
         Person,
         on_delete=models.CASCADE,
         related_name="access_account",
+        verbose_name="pessoa",
     )
 
-    email = models.EmailField(unique=True, db_index=True)
+    email = models.EmailField("e-mail", unique=True, db_index=True)
 
-    password_hash = models.CharField(max_length=255)
+    role = models.CharField(
+        "perfil",
+        max_length=20,
+        choices=Role.choices,
+        default=Role.EMPLOYEE,
+        db_index=True,
+        help_text="Perfil de acesso. DRIVER só para pessoa DRIVER; "
+        "EMPLOYEE, MANAGER e GERENTE só para pessoa EMPLOYEE.",
+    )
 
-    must_change_password = models.BooleanField(default=True)
+    password_hash = models.CharField("hash da senha", max_length=255)
 
-    failed_login_attempts = models.IntegerField(default=0)
+    must_change_password = models.BooleanField("deve trocar a senha", default=True)
 
-    last_login = models.DateTimeField(null=True, blank=True)
+    failed_login_attempts = models.IntegerField("tentativas de login com falha", default=0)
 
-    blocked_until = models.DateTimeField(null=True, blank=True)
+    last_login = models.DateTimeField("último login", null=True, blank=True)
+
+    blocked_until = models.DateTimeField("bloqueada até", null=True, blank=True)
 
     # Redefinição de senha por código (OTP) — sem envio por e-mail
-    password_reset_code_hash = models.CharField(max_length=255, blank=True)
-    password_reset_expires_at = models.DateTimeField(null=True, blank=True)
-    password_reset_requested_at = models.DateTimeField(null=True, blank=True)
-    password_reset_code_used = models.BooleanField(default=True)
+    password_reset_code_hash = models.CharField("hash do código de redefinição", max_length=255, blank=True)
+    password_reset_expires_at = models.DateTimeField("código expira em", null=True, blank=True)
+    password_reset_requested_at = models.DateTimeField("código solicitado em", null=True, blank=True)
+    password_reset_code_used = models.BooleanField("código já usado", default=True)
+
+    class Meta:
+        verbose_name = "conta de acesso"
+        verbose_name_plural = "contas de acesso"
+
+    @staticmethod
+    def default_role_for(person):
+        if person.type == Person.PersonType.DRIVER:
+            return AccessAccount.Role.DRIVER
+        return AccessAccount.Role.EMPLOYEE
+
+    @property
+    def is_manager(self) -> bool:
+        return self.role == self.Role.MANAGER
+
+    @property
+    def is_gerente(self) -> bool:
+        return self.role == self.Role.GERENTE
+
+    def validate_role(self):
+        """DRIVER ⇔ pessoa DRIVER; EMPLOYEE/MANAGER/GERENTE exigem pessoa EMPLOYEE."""
+        if not self.person_id:
+            return
+        person_is_driver = self.person.type == Person.PersonType.DRIVER
+        if (self.role == self.Role.DRIVER) != person_is_driver:
+            if person_is_driver:
+                message = "Pessoa do tipo DRIVER só pode ter o perfil DRIVER."
+            else:
+                message = "O perfil DRIVER exige uma pessoa do tipo DRIVER."
+            raise ValidationError({"role": message})
 
     def clean(self):
         super().clean()
         if self.email:
             self.email = normalize_email(self.email)
+        self.validate_role()
 
     def save(self, *args, **kwargs):
         if self.email:
             self.email = normalize_email(self.email)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "role" in update_fields:
+            self.validate_role()
         super().save(*args, **kwargs)
 
     def set_password(self, raw_password):
@@ -204,16 +279,21 @@ class AccessAccount(BaseModel):
 
 
 class Route(BaseModel):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='routes')
-    name = models.CharField(max_length=255)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='routes', verbose_name="empresa")
+    name = models.CharField("nome", max_length=255)
     vehicle = models.ForeignKey(
         "Vehicle",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="routes",
+        verbose_name="veículo",
         help_text="Veículo (e motorista) atribuído à rota — usado pelo app do motorista.",
     )
+
+    class Meta:
+        verbose_name = "rota"
+        verbose_name_plural = "rotas"
 
     def __str__(self):
         return self.name
@@ -226,17 +306,22 @@ class RouteStop(BaseModel):
         Route,
         on_delete=models.CASCADE,
         related_name="stops",
+        verbose_name="rota",
     )
     meeting_point = models.ForeignKey(
         "MeetingPoint",
         on_delete=models.CASCADE,
         related_name="route_stops",
+        verbose_name="ponto de encontro",
     )
     sequence = models.PositiveSmallIntegerField(
+        "ordem",
         help_text="0 = primeiro ponto; ordem crescente até o destino.",
     )
 
     class Meta:
+        verbose_name = "parada"
+        verbose_name_plural = "paradas"
         ordering = ["sequence"]
         constraints = [
             models.UniqueConstraint(
@@ -261,10 +346,26 @@ class RouteStop(BaseModel):
         return f"{self.route.name} #{self.sequence} {self.meeting_point.name}"
 
 
+WEEKDAY_LABELS = {
+    "MON": "Seg", "TUE": "Ter", "WED": "Qua", "THU": "Qui", "FRI": "Sex", "SAT": "Sáb", "SUN": "Dom",
+}
+
+
 class Schedule(BaseModel):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='schedules')
-    weekdays = models.JSONField()
-    time = models.TimeField()
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='schedules', verbose_name="empresa")
+    weekdays = models.JSONField("dias da semana", help_text='Lista de dias, ex.: ["MON", "TUE", "WED"].')
+    time = models.TimeField("horário")
+
+    class Meta:
+        verbose_name = "horário"
+        verbose_name_plural = "horários"
+
+    def weekdays_label(self) -> str:
+        days = self.weekdays if isinstance(self.weekdays, list) else [self.weekdays]
+        return ", ".join(WEEKDAY_LABELS.get(str(day).upper(), str(day)) for day in days)
+
+    def __str__(self):
+        return f"{self.time:%H:%M} ({self.weekdays_label()})" if self.time else self.weekdays_label()
 
 
 class Address(BaseModel):
@@ -273,7 +374,8 @@ class Address(BaseModel):
         on_delete=models.CASCADE,
         related_name='addresses',
         null=True,
-        blank=True
+        blank=True,
+        verbose_name="empresa",
     )
 
     person = models.ForeignKey(
@@ -281,25 +383,34 @@ class Address(BaseModel):
         on_delete=models.CASCADE,
         related_name='addresses',
         null=True,
-        blank=True
+        blank=True,
+        verbose_name="pessoa",
     )
 
-    street = models.CharField(max_length=100)
-    number = models.CharField(max_length=20)
-    city = models.CharField(max_length=50)
-    state = models.CharField(max_length=50)
-    zip_code = models.CharField(max_length=10)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    street = models.CharField("logradouro", max_length=100)
+    number = models.CharField("número", max_length=20)
+    city = models.CharField("cidade", max_length=50)
+    state = models.CharField("estado", max_length=50)
+    zip_code = models.CharField("CEP", max_length=10)
+    latitude = models.DecimalField("latitude", max_digits=9, decimal_places=6)
+    longitude = models.DecimalField("longitude", max_digits=9, decimal_places=6)
+
+    class Meta:
+        verbose_name = "endereço"
+        verbose_name_plural = "endereços"
 
     def __str__(self):
         return f"{self.street}, {self.number} - {self.city}"
 
 
 class MeetingPoint(BaseModel):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='meeting_points')
-    name = models.CharField(max_length=255)
-    address = models.ForeignKey(Address, on_delete=models.CASCADE, related_name='meeting_points')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='meeting_points', verbose_name="empresa")
+    name = models.CharField("nome", max_length=255)
+    address = models.ForeignKey(Address, on_delete=models.CASCADE, related_name='meeting_points', verbose_name="endereço")
+
+    class Meta:
+        verbose_name = "ponto de encontro"
+        verbose_name_plural = "pontos de encontro"
 
     def __str__(self):
         return self.name
@@ -308,22 +419,24 @@ class MeetingPoint(BaseModel):
 
 class RoutePassenger(BaseModel):
     class BoardingStatus(models.TextChoices):
-        PENDING = "pending", "Pending"
-        CONFIRMED = "confirmed", "Confirmed"
-        ABSENT = "absent", "Absent"
+        PENDING = "pending", "Pendente"
+        CONFIRMED = "confirmed", "Confirmado"
+        ABSENT = "absent", "Ausente"
 
     person = models.ForeignKey(
         Person,
         on_delete=models.CASCADE,
         related_name='route_passengers',
         limit_choices_to={'type': 'EMPLOYEE'},
-        db_index= True
+        db_index= True,
+        verbose_name="passageiro",
     )
     route = models.ForeignKey(
         Route,
         on_delete=models.CASCADE,
         related_name='route_passengers',
-        db_index= True
+        db_index= True,
+        verbose_name="rota",
     )
     route_stop = models.ForeignKey(
         "RouteStop",
@@ -331,9 +444,11 @@ class RoutePassenger(BaseModel):
         null=True,
         blank=True,
         related_name="passengers",
+        verbose_name="parada",
         help_text="Parada de embarque/desembarque; opcional para compatibilidade.",
     )
     boarding_status = models.CharField(
+        "status de embarque",
         max_length=20,
         choices=BoardingStatus.choices,
         default=BoardingStatus.PENDING,
@@ -341,10 +456,15 @@ class RoutePassenger(BaseModel):
     )
 
     class Meta:
+        verbose_name = "passageiro da rota"
+        verbose_name_plural = "passageiros das rotas"
         unique_together = ('person', 'route')
         indexes = [
             models.Index(fields=["person", "route"]),
         ]
+
+    def __str__(self):
+        return f"{self.person.name} · {self.route.name}"
 
     def clean(self):
         super().clean()
@@ -360,24 +480,29 @@ class RoutePassenger(BaseModel):
 
 class RouteEvent(BaseModel):
     EVENT_TYPE_CHOICES = [
-        ('departure', 'Departure'),
-        ('arrival', 'Arrival'),
-        ('stop', 'Stop'),
-        ('delay', 'Delay'),
-        ('incident', 'Incident'),
+        ('departure', 'Partida'),
+        ('arrival', 'Chegada'),
+        ('stop', 'Parada'),
+        ('delay', 'Atraso'),
+        ('incident', 'Incidente'),
     ]
 
     route = models.ForeignKey(
         Route,
         on_delete=models.CASCADE,
-        related_name='events'
+        related_name='events',
+        verbose_name="rota",
     )
 
-    event_type = models.CharField(max_length=20, choices=EVENT_TYPE_CHOICES)
-    description = models.TextField(blank=True)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    event_type = models.CharField("tipo", max_length=20, choices=EVENT_TYPE_CHOICES)
+    description = models.TextField("descrição", blank=True)
+    latitude = models.DecimalField("latitude", max_digits=9, decimal_places=6)
+    longitude = models.DecimalField("longitude", max_digits=9, decimal_places=6)
+    timestamp = models.DateTimeField("data/hora", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "evento de rota"
+        verbose_name_plural = "eventos de rota"
 
     def __str__(self):
         return f"{self.route.name} - {self.event_type}"
@@ -388,7 +513,8 @@ class Vehicle(BaseModel):
         on_delete=models.CASCADE,
         related_name='vehicles',
         null=True,
-        blank=True
+        blank=True,
+        verbose_name="empresa",
     )
 
     driver = models.ForeignKey(
@@ -398,11 +524,16 @@ class Vehicle(BaseModel):
         blank=True,
         related_name='vehicles',
         limit_choices_to={'type': 'DRIVER'},
+        verbose_name="motorista",
     )
 
-    plate_number = models.CharField(max_length=20, unique=True)
-    model = models.CharField(max_length=100)
-    capacity = models.PositiveIntegerField()
+    plate_number = models.CharField("placa", max_length=20, unique=True)
+    model = models.CharField("modelo", max_length=100)
+    capacity = models.PositiveIntegerField("capacidade")
+
+    class Meta:
+        verbose_name = "veículo"
+        verbose_name_plural = "veículos"
 
     def __str__(self):
         return self.plate_number

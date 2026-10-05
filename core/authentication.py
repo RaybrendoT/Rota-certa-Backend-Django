@@ -15,6 +15,7 @@ class AccessAccountPrincipal:
     def __init__(self, access_account: AccessAccount):
         self.access_account = access_account
         self.person = access_account.person
+        self.role = access_account.role
         self.pk = access_account.pk
         self.id = access_account.pk
 

@@ -1,0 +1,119 @@
+/* Rota Certa · ajustes do tema Jazzmin 3 (Bootstrap 5 / AdminLTE 4) para as cores do painel Angular.
+   Topo #1e40af · menu #0f172a · destaque #3b82f6 · texto do menu #cbd5e1.
+   O AdminLTE aplica cores por classes utilitárias com !important (bg-body-*), daí os !important aqui. */
+:root {
+  --rc-primary: #1e40af;
+  --rc-primary-hover: #1d3a9e;
+  --rc-accent: #3b82f6;
+  --rc-sidebar: #0f172a;
+  --rc-sidebar-hover: #1e2937;
+  --rc-sidebar-text: #cbd5e1;
+  --rc-muted: #64748b;
+  --rc-page: #f1f5f9;
+}
+
+/* ---------- Topo ---------- */
+.app-header.navbar {
+  background-color: var(--rc-primary) !important;
+  border-bottom: 0 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .2);
+}
+.app-header .nav-link { color: #dbeafe !important; }
+.app-header .nav-link:hover { color: #fff !important; }
+.app-header .form-control { background-color: rgba(255, 255, 255, .12); border-color: transparent; color: #fff; }
+.app-header .form-control::placeholder { color: #bfdbfe; }
+
+/* ---------- Menu lateral ---------- */
+.app-sidebar { background-color: var(--rc-sidebar) !important; border-right: 1px solid var(--rc-sidebar-hover); }
+.app-sidebar .sidebar-brand {
+  background-color: var(--rc-sidebar) !important;
+  border-bottom: 1px solid var(--rc-sidebar-hover) !important;
+}
+.app-sidebar .sidebar-brand .brand-link,
+.app-sidebar .sidebar-brand .brand-text { color: #fff !important; font-weight: 600; }
+.app-sidebar .brand-image {
+  width: 32px;
+  height: 32px;
+  max-height: 32px;
+  border-radius: 8px;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+.app-sidebar .nav-header {
+  color: var(--rc-muted) !important;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.app-sidebar .nav-link { color: var(--rc-sidebar-text) !important; border-radius: 8px; }
+.app-sidebar .nav-link:hover { background-color: var(--rc-sidebar-hover) !important; color: #fff !important; }
+.app-sidebar .nav-link.active { background-color: var(--rc-primary) !important; color: #fff !important; box-shadow: none !important; }
+.app-sidebar .user-panel,
+.app-sidebar .user-panel a { color: var(--rc-sidebar-text) !important; border-bottom-color: var(--rc-sidebar-hover) !important; }
+
+/* ---------- Conteúdo ---------- */
+body.bg-body-tertiary, .app-main { background-color: var(--rc-page) !important; }
+.card { border: 0; border-radius: 12px; box-shadow: 0 1px 3px rgba(15, 23, 42, .08); }
+.card-primary.card-outline, .card-outline { border-top: 3px solid var(--rc-primary) !important; }
+#result_list thead th { background-color: #f8fafc; }
+
+/* ---------- Botões, links e destaques ---------- */
+.btn-primary { --bs-btn-bg: var(--rc-primary); --bs-btn-border-color: var(--rc-primary);
+  --bs-btn-hover-bg: var(--rc-primary-hover); --bs-btn-hover-border-color: var(--rc-primary-hover);
+  --bs-btn-active-bg: var(--rc-primary-hover); --bs-btn-active-border-color: var(--rc-primary-hover); }
+.btn-outline-primary { --bs-btn-color: var(--rc-primary); --bs-btn-border-color: var(--rc-primary);
+  --bs-btn-hover-bg: var(--rc-primary); --bs-btn-hover-border-color: var(--rc-primary); }
+.btn-info { --bs-btn-bg: var(--rc-accent); --bs-btn-border-color: var(--rc-accent); --bs-btn-color: #fff;
+  --bs-btn-hover-bg: var(--rc-primary); --bs-btn-hover-border-color: var(--rc-primary); --bs-btn-hover-color: #fff; }
+.app-main a:not(.btn):not(.nav-link) { color: var(--rc-primary); }
+.app-main a:not(.btn):not(.nav-link):hover { color: var(--rc-accent); }
+.page-link { color: var(--rc-primary); }
+.active > .page-link, .page-link.active { background-color: var(--rc-primary); border-color: var(--rc-primary); }
+.nav-tabs .nav-link.active { border-top: 2px solid var(--rc-primary); color: var(--rc-primary); }
+
+/* ---------- Login: fundo escuro como a tela de login do painel ---------- */
+body.login-page { background-color: var(--rc-sidebar) !important; }
+.login-page .login-logo img { width: 72px; height: 72px; border-radius: 16px; }
+.login-page .login-logo, .login-page .login-logo a { color: #fff; }
+.login-page .card { border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+
+/* ---------- Menu recolhido (botão de menu): só ícones, como no painel Angular ---------- */
+/* O AdminLTE expande o menu mini ao passar o mouse; aqui ele fica estreito e o nome
+   do item aparece num tooltip (rotacerta.js). */
+.sidebar-mini.sidebar-collapse .app-sidebar,
+.sidebar-mini.sidebar-collapse .app-sidebar:hover {
+  min-width: 4.6rem !important;
+  max-width: 4.6rem !important;
+}
+.sidebar-mini.sidebar-collapse .app-sidebar:hover .brand-text,
+.sidebar-mini.sidebar-collapse .app-sidebar:hover .sidebar-menu .nav-link p {
+  display: inline-block !important;
+  width: 0 !important;
+  max-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  visibility: hidden !important;
+}
+.sidebar-mini.sidebar-collapse .app-sidebar:hover .nav-arrow,
+.sidebar-mini.sidebar-collapse .app-sidebar:hover .nav-badge { display: none !important; }
+.sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-link,
+.sidebar-mini.sidebar-collapse .app-sidebar:hover .sidebar-menu .nav-link {
+  width: 3.6rem !important;
+  display: flex;
+  justify-content: center;
+}
+.sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-link .nav-icon { margin: 0 !important; }
+/* Títulos de seção viram uma linha discreta (mesmo efeito do painel). */
+.sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-header,
+.sidebar-mini.sidebar-collapse .app-sidebar:hover .sidebar-menu .nav-header {
+  display: block !important;
+  height: 0;
+  padding: 0 !important;
+  margin: 8px 12px;
+  overflow: hidden;
+  border-top: 1px solid var(--rc-sidebar-hover);
+}
+.sidebar-mini.sidebar-collapse .app-sidebar .brand-link { justify-content: center; }
+.sidebar-mini.sidebar-collapse .app-sidebar .user-panel .info { display: none !important; }
+.sidebar-mini.sidebar-collapse .app-sidebar .user-panel { justify-content: center; }

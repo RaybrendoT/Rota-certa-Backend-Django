@@ -3,16 +3,19 @@ import urllib.error
 import urllib.request
 
 from django.conf import settings
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.filters import OrderingFilter
 
 from .models import (
+    AccessAccount,
     Company,
     Person,
     Route,
@@ -25,6 +28,7 @@ from .models import (
     Vehicle,
 )
 from .serializers import (
+    AccessRoleSerializer,
     CompanySerializer,
     PersonSerializer,
     RouteSerializer,
@@ -39,7 +43,16 @@ from .serializers import (
     VehicleSerializer,
 )
 from .driver_serializers import DriverRouteBoardSerializer
-from .permissions import IsDriver
+from .permissions import (
+    IsDriver,
+    IsGerente,
+    IsManager,
+    IsManagerOrDriver,
+    IsManagerOrGerente,
+    is_driver,
+    is_manager,
+    route_belongs_to_driver,
+)
 from .filters import (
     CompanyFilter,
     PersonFilter,
@@ -59,8 +72,10 @@ class BaseViewSet(viewsets.ModelViewSet):
     """
     - Lista apenas registros ativos por padrão
     - DELETE remove do banco (sem soft delete)
+    - Apenas gestores (MANAGER); os viewsets que o app do motorista usa afrouxam isso
     """
 
+    permission_classes = [IsAuthenticated, IsManager]
     filter_backends = [DjangoFilterBackend]
 
     def get_queryset(self):
@@ -70,19 +85,99 @@ class BaseViewSet(viewsets.ModelViewSet):
         return qs
 
 
+class CompanyScopedQuerySetMixin:
+    """
+    Restringe o gestor (MANAGER) à própria empresa — na leitura (get_queryset) e na
+    escrita (perform_create/perform_update, para não aceitar um `company`/`route` de
+    outra empresa no payload). O gerente, que não é MANAGER, não é afetado.
+
+    `company_lookup` é "company" (FK direta) ou "<relacao>__company" (ex.: "route__company").
+    """
+
+    company_lookup = "company"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if is_manager(self.request):
+            company_id = self.request.user.person.company_id
+            qs = qs.filter(**{f"{self.company_lookup}_id": company_id})
+        return qs
+
+    def _resolve_target_company_id(self, validated_data, instance):
+        if self.company_lookup == "company":
+            company = validated_data.get("company", getattr(instance, "company", None))
+            return company.pk if company else None
+        root_field = self.company_lookup.split("__", 1)[0]
+        related = validated_data.get(root_field, getattr(instance, root_field, None))
+        return related.company_id if related else None
+
+    def _check_company_scope(self, serializer):
+        if not is_manager(self.request):
+            return
+        target_id = self._resolve_target_company_id(serializer.validated_data, serializer.instance)
+        if target_id != self.request.user.person.company_id:
+            raise PermissionDenied("Este recurso não pertence à sua empresa.")
+
+    def perform_create(self, serializer):
+        self._check_company_scope(serializer)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._check_company_scope(serializer)
+        serializer.save()
+
+
 class CompanyViewSet(BaseViewSet):
+    """Cadastro de empresas: exclusivo do gerente (fora do escopo do gestor)."""
+
+    permission_classes = [IsAuthenticated, IsGerente]
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
     filterset_class = CompanyFilter
 
 
-class PersonViewSet(BaseViewSet):
-    queryset = Person.objects.select_related("company")
+class PersonViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
+    queryset = Person.objects.select_related("company", "access_account")
     serializer_class = PersonSerializer
     filterset_class = PersonFilter
 
+    # Só o gerente promove alguém a gestor; gestor e gerente cadastram/editam pessoas.
+    GERENTE_ACTIONS = ("access_role",)
 
-class RouteViewSet(BaseViewSet):
+    def get_permissions(self):
+        if self.action in self.GERENTE_ACTIONS:
+            return [IsAuthenticated(), IsGerente()]
+        return [IsAuthenticated(), IsManagerOrGerente()]
+
+    @action(detail=True, methods=["post"], url_path="access-role")
+    def access_role(self, request, pk=None):
+        """Define o perfil de acesso (EMPLOYEE ou MANAGER) da conta da pessoa."""
+        person = self.get_object()
+        serializer = AccessRoleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        role = serializer.validated_data["role"]
+
+        if person.type == Person.PersonType.DRIVER:
+            raise ValidationError(
+                {"role": "O perfil de um motorista é sempre DRIVER."}
+            )
+        try:
+            account = person.access_account
+        except AccessAccount.DoesNotExist:
+            raise ValidationError(
+                {"detail": "A pessoa ainda não tem conta de acesso."}
+            )
+        if account.pk == request.user.pk and role != AccessAccount.Role.MANAGER:
+            raise ValidationError(
+                {"role": "Você não pode remover o seu próprio perfil de gestor."}
+            )
+
+        account.role = role
+        account.save(update_fields=["role", "updated_at"])
+        return Response(PersonSerializer(person).data)
+
+
+class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = Route.objects.select_related("company", "vehicle")
     serializer_class = RouteSerializer
     filterset_class = RouteFilter
@@ -154,9 +249,20 @@ class RouteViewSet(BaseViewSet):
         )
         return Response(DriverRouteBoardSerializer().to_representation(route))
 
-    @action(detail=True, methods=["get"])
+    @action(
+        detail=True,
+        methods=["get"],
+        permission_classes=[IsAuthenticated, IsManagerOrDriver],
+    )
     def events(self, request, pk=None):
-        route = self.get_object()
+        route = get_object_or_404(
+            Route.objects.filter(is_active=True).select_related("vehicle"), pk=pk
+        )
+        if is_driver(request) and not route_belongs_to_driver(route, request.user.person):
+            # 404 (e não 403) para não revelar a existência de rotas de outros motoristas
+            raise Http404
+        if is_manager(request) and route.company_id != request.user.person.company_id:
+            raise Http404
         qs = route.events.order_by("-timestamp")
         serializer = RouteEventSerializer(qs, many=True)
         return Response(serializer.data)
@@ -165,28 +271,10 @@ class RouteViewSet(BaseViewSet):
         detail=True,
         methods=["get"],
         url_path="navigation",
-        permission_classes=[IsAuthenticated],
+        permission_classes=[IsAuthenticated, IsDriver],
     )
     def navigation(self, request, pk=None):
         person = request.user.person
-        print(
-            "[route-navigation]",
-            f"account_id={getattr(request.user, 'id', None)}",
-            f"person_id={person.id}",
-            f"person_type={person.type}",
-            f"route_id={pk}",
-        )
-
-        if person.type != Person.PersonType.DRIVER:
-            return Response(
-                {
-                    "detail": "Apenas motoristas podem acessar este recurso.",
-                    "person_id": person.id,
-                    "person_type": person.type,
-                    "route_id": pk,
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
 
         route = get_object_or_404(
             Route.objects.filter(is_active=True, vehicle__driver=person)
@@ -279,58 +367,147 @@ class RouteViewSet(BaseViewSet):
         )
 
 
-class ScheduleViewSet(BaseViewSet):
+class ScheduleViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = Schedule.objects.select_related("company")
     serializer_class = ScheduleSerializer
     filterset_class = ScheduleFilter
 
 
 class AddressViewSet(BaseViewSet):
+    """
+    Sem `company_lookup` fixo: um endereço é da empresa (ponto de encontro) OU de uma
+    pessoa (endereço residencial), nunca os dois — o escopo do gestor precisa cobrir os dois casos.
+    """
+
     queryset = Address.objects.all()
     serializer_class = AddressSerializer
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if is_manager(self.request):
+            company_id = self.request.user.person.company_id
+            qs = qs.filter(Q(company_id=company_id) | Q(person__company_id=company_id))
+        return qs
 
-class MeetingPointViewSet(BaseViewSet):
+    def _target_company_id(self, serializer):
+        data = serializer.validated_data
+        instance = serializer.instance
+        company = data.get("company", getattr(instance, "company", None))
+        if company:
+            return company.pk
+        person = data.get("person", getattr(instance, "person", None))
+        return person.company_id if person else None
+
+    def _check_company_scope(self, serializer):
+        if is_manager(self.request):
+            company_id = self.request.user.person.company_id
+            if self._target_company_id(serializer) != company_id:
+                raise PermissionDenied("Este endereço não pertence à sua empresa.")
+
+    def perform_create(self, serializer):
+        self._check_company_scope(serializer)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._check_company_scope(serializer)
+        serializer.save()
+
+
+class MeetingPointViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = MeetingPoint.objects.select_related("company", "address")
     serializer_class = MeetingPointSerializer
     filterset_class = MeetingPointFilter
 
 
-class DriverViewSet(BaseViewSet):
+class DriverViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = Person.objects.filter(type="DRIVER").select_related("company")
     serializer_class = DriverSerializer
     filterset_class = DriverFilter
 
 
-class EmployeeViewSet(BaseViewSet):
+class EmployeeViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = Person.objects.filter(type="EMPLOYEE").select_related("company")
     serializer_class = EmployeeSerializer
     filterset_class = EmployeeFilter
 
 
-class RoutePassengerViewSet(BaseViewSet):
-    queryset = RoutePassenger.objects.select_related("person", "route", "route_stop")
+class RoutePassengerViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
+    queryset = RoutePassenger.objects.select_related(
+        "person", "person__company", "person__access_account", "route", "route_stop"
+    )
     serializer_class = RoutePassengerSerializer
     filterset_class = RoutePassengerFilter
+    company_lookup = "route__company"
+
+    # O motorista consulta os passageiros das próprias rotas e só marca o embarque (PATCH).
+    DRIVER_ACTIONS = ("list", "retrieve", "partial_update")
+    DRIVER_EDITABLE_FIELDS = {"boarding_status"}
+
+    def get_permissions(self):
+        if self.action in self.DRIVER_ACTIONS:
+            return [IsAuthenticated(), IsManagerOrDriver()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if is_driver(self.request):
+            qs = qs.filter(route__vehicle__driver=self.request.user.person)
+        return qs
+
+    def partial_update(self, request, *args, **kwargs):
+        if is_driver(request):
+            extra = set(request.data.keys()) - self.DRIVER_EDITABLE_FIELDS
+            if extra:
+                raise PermissionDenied(
+                    "Motoristas só podem alterar o boarding_status do passageiro."
+                )
+        return super().partial_update(request, *args, **kwargs)
 
 
-class RouteStopViewSet(BaseViewSet):
+class RouteStopViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = RouteStop.objects.select_related("route", "meeting_point", "meeting_point__address")
     serializer_class = RouteStopSerializer
     filterset_class = RouteStopFilter
+    company_lookup = "route__company"
 
 
-class RouteEventViewSet(BaseViewSet):
+class RouteEventViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = RouteEvent.objects.select_related("route")
     serializer_class = RouteEventSerializer
+    company_lookup = "route__company"
 
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = RouteEventFilter
     ordering_fields = ["timestamp", "event_type"]
     ordering = ["-timestamp"]
 
-class VehicleViewSet(BaseViewSet):
-    queryset = Vehicle.objects.select_related("company", "driver")
+    # O motorista registra e consulta eventos apenas das próprias rotas.
+    DRIVER_ACTIONS = ("list", "retrieve", "create")
+
+    def get_permissions(self):
+        if self.action in self.DRIVER_ACTIONS:
+            return [IsAuthenticated(), IsManagerOrDriver()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if is_driver(self.request):
+            qs = qs.filter(route__vehicle__driver=self.request.user.person)
+        return qs
+
+    def perform_create(self, serializer):
+        route = serializer.validated_data["route"]
+        if is_driver(self.request) and not route_belongs_to_driver(
+            route, self.request.user.person
+        ):
+            raise PermissionDenied("Esta rota não está atribuída a você.")
+        if is_manager(self.request) and route.company_id != self.request.user.person.company_id:
+            raise PermissionDenied("Esta rota não pertence à sua empresa.")
+        serializer.save()
+
+
+class VehicleViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
+    queryset = Vehicle.objects.select_related("company", "driver", "driver__access_account")
     serializer_class = VehicleSerializer
     filterset_class = VehicleFilter
 

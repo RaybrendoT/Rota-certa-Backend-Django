@@ -54,6 +54,22 @@ class AccessAccountTokenVerifyView(TokenVerifyView):
     authentication_classes = []
 
 
+class MeView(APIView):
+    """Perfil da sessão atual (mesmo formato de `person` do login), lido do banco."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        account = request.user.access_account
+        return Response(
+            {
+                "must_change_password": account.must_change_password,
+                "person": PersonBriefSerializer(instance=account.person).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ChangePasswordView(APIView):
     """
     Autenticado via Bearer. Atualiza a senha, zera must_change_password e
