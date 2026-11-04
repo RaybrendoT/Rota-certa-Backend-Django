@@ -1,17 +1,18 @@
-from rest_framework import serializers
 from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
+
 from .models import (
     AccessAccount,
+    Address,
     Company,
+    MeetingPoint,
     Person,
     Route,
+    RouteEvent,
+    RoutePassenger,
     RouteStop,
     Schedule,
-    Address,
-    MeetingPoint,
-    RoutePassenger,
-    RouteEvent,
     Vehicle,
 )
 

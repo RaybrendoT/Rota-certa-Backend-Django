@@ -1,0 +1,15 @@
+# Lint do backend (roda no CI: .github/workflows/ci-cd.yml). Localmente:
+#   pip install ruff==0.17.3 && ruff check .
+target-version = "py312"
+line-length = 120
+extend-exclude = ["*/migrations/*", ".venv"]
+
+[lint]
+# pycodestyle, pyflakes, imports ordenados e bugbear (erros comuns).
+select = ["E", "W", "F", "I", "B"]
+ignore = [
+    "E501",  # linhas longas: o formatador não é obrigatório neste projeto
+    "B904",  # raise ... from err dentro de except: as mensagens já explicam a causa
+    "B905",  # zip(a, a[1:]) é proposital (pares consecutivos)
+]
+

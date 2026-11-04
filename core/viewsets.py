@@ -8,56 +8,46 @@ from django.db.models import F, Prefetch, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import status, viewsets
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.filters import OrderingFilter
 from rest_framework.throttling import UserRateThrottle
 
+from .dates import local_today
+from .driver_serializers import DriverRouteBoardSerializer
+from .filters import (
+    CompanyFilter,
+    DriverFilter,
+    EmployeeFilter,
+    MeetingPointFilter,
+    PersonFilter,
+    RouteEventFilter,
+    RouteFilter,
+    RoutePassengerFilter,
+    RouteStopFilter,
+    ScheduleFilter,
+    VehicleFilter,
+)
 from .models import (
     AccessAccount,
-    Company,
-    Person,
-    Route,
-    RouteStop,
-    RouteEvent,
-    Schedule,
     Address,
+    Company,
     MeetingPoint,
     Notification,
+    Person,
+    Route,
+    RouteEvent,
     RoutePassenger,
+    RouteStop,
+    Schedule,
     Vehicle,
     VehicleLocation,
 )
-from .serializers import (
-    AccessRoleSerializer,
-    CompanySerializer,
-    PersonSerializer,
-    RouteSerializer,
-    RouteStopSerializer,
-    ScheduleSerializer,
-    AddressSerializer,
-    MeetingPointSerializer,
-    DriverSerializer,
-    EmployeeSerializer,
-    RoutePassengerSerializer,
-    RouteEventSerializer,
-    VehicleSerializer,
-)
-from .dates import local_today
-from .person_overview import person_overview
-from .driver_serializers import DriverRouteBoardSerializer
 from .notifications import on_boarding_status_changed, on_vehicle_location
-from .realtime_serializers import (
-    BoardingStatusInputSerializer,
-    CollaboratorRouteSerializer,
-    LocationInputSerializer,
-    NotificationSerializer,
-    location_payload,
-)
 from .permissions import (
     IsDriver,
     IsGerente,
@@ -69,18 +59,28 @@ from .permissions import (
     is_manager,
     route_belongs_to_driver,
 )
-from .filters import (
-    CompanyFilter,
-    PersonFilter,
-    DriverFilter,
-    EmployeeFilter,
-    RouteFilter,
-    ScheduleFilter,
-    MeetingPointFilter,
-    RouteEventFilter,
-    RoutePassengerFilter,
-    VehicleFilter,
-    RouteStopFilter,
+from .person_overview import person_overview
+from .realtime_serializers import (
+    BoardingStatusInputSerializer,
+    CollaboratorRouteSerializer,
+    LocationInputSerializer,
+    NotificationSerializer,
+    location_payload,
+)
+from .serializers import (
+    AccessRoleSerializer,
+    AddressSerializer,
+    CompanySerializer,
+    DriverSerializer,
+    EmployeeSerializer,
+    MeetingPointSerializer,
+    PersonSerializer,
+    RouteEventSerializer,
+    RoutePassengerSerializer,
+    RouteSerializer,
+    RouteStopSerializer,
+    ScheduleSerializer,
+    VehicleSerializer,
 )
 
 

@@ -18,7 +18,6 @@ from core.models import (
     Vehicle,
 )
 
-
 COMPANIES = [
     {
         "name": "Polo Digital Manaus",
@@ -358,7 +357,7 @@ class Command(BaseCommand):
 
     def create_route_stops(self, routes, meeting_points):
         stops_by_route = {}
-        for route_index, route in enumerate(routes):
+        for route in routes:
             points = meeting_points[route.company_id]
             stops_by_route[route.id] = []
             for sequence, point in enumerate(points[:4]):

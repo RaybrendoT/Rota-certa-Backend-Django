@@ -10,9 +10,9 @@ from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 
 from core.geo import distance_meters
+from core.home_pickup import PICKUP_RADIUS_M, drop_unused_home_stops, pickup_stop
 from core.models import Address, MeetingPoint, Notification, Person, Route, RoutePassenger, RouteStop
 from core.notifications import notify
-from core.home_pickup import PICKUP_RADIUS_M, drop_unused_home_stops, pickup_stop
 from core.self_address import address_payload, nearest_point
 
 # Rotas fixas com uma parada até essa distância da casa entram nas sugestões.
