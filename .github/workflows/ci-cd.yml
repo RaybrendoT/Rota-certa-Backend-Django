@@ -177,9 +177,15 @@ jobs:
             exit 1
           fi
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/ec2 && chmod 600 ~/.ssh/ec2
+          # tr -d '\r': chave copiada no Windows chega com CRLF e o OpenSSH recusa ("error in libcrypto").
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/ec2 && chmod 600 ~/.ssh/ec2
+          if ! ssh-keygen -y -f ~/.ssh/ec2 > /dev/null 2>&1; then
+            echo "::error::EC2_SSH_KEY não é uma chave privada válida. Cole o arquivo inteiro SEM .pub, das linhas -----BEGIN ... até -----END ... PRIVATE KEY-----."
+            exit 1
+          fi
+          echo "Chave de deploy: $(ssh-keygen -lf ~/.ssh/ec2)"
           if [ -n "$KNOWN_HOSTS" ]; then
-            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+            printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           else
             echo "::warning::Sem EC2_SSH_KNOWN_HOSTS: confiando na chave do servidor lida agora (ssh-keyscan)."
             ssh-keyscan -T 15 -H "$EC2_HOST" > ~/.ssh/known_hosts
