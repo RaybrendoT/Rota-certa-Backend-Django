@@ -1,11 +1,13 @@
 import json
 import urllib.error
 import urllib.request
+from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import Prefetch, Q
+from django.db.models import F, Prefetch, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status, viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
@@ -13,6 +15,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.filters import OrderingFilter
+from rest_framework.throttling import UserRateThrottle
 
 from .models import (
     AccessAccount,
@@ -24,8 +27,10 @@ from .models import (
     Schedule,
     Address,
     MeetingPoint,
+    Notification,
     RoutePassenger,
     Vehicle,
+    VehicleLocation,
 )
 from .serializers import (
     AccessRoleSerializer,
@@ -42,13 +47,24 @@ from .serializers import (
     RouteEventSerializer,
     VehicleSerializer,
 )
+from .dates import local_today
+from .person_overview import person_overview
 from .driver_serializers import DriverRouteBoardSerializer
+from .notifications import on_boarding_status_changed, on_vehicle_location
+from .realtime_serializers import (
+    BoardingStatusInputSerializer,
+    CollaboratorRouteSerializer,
+    LocationInputSerializer,
+    NotificationSerializer,
+    location_payload,
+)
 from .permissions import (
     IsDriver,
     IsGerente,
     IsManager,
     IsManagerOrDriver,
     IsManagerOrGerente,
+    IsPassengerPerson,
     is_driver,
     is_manager,
     route_belongs_to_driver,
@@ -66,6 +82,12 @@ from .filters import (
     VehicleFilter,
     RouteStopFilter,
 )
+
+
+class VehicleLocationThrottle(UserRateThrottle):
+    """Limite próprio para o GPS do motorista (DEFAULT_THROTTLE_RATES["vehicle_location"])."""
+
+    scope = "vehicle_location"
 
 
 class BaseViewSet(viewsets.ModelViewSet):
@@ -149,6 +171,11 @@ class PersonViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
             return [IsAuthenticated(), IsGerente()]
         return [IsAuthenticated(), IsManagerOrGerente()]
 
+    @action(detail=True, methods=["get"])
+    def overview(self, request, pk=None):
+        """GET people/{id}/overview/ — conta, endereço, rotas atuais e outros cadastros da mesma pessoa."""
+        return Response(person_overview(self.get_object()))
+
     @action(detail=True, methods=["post"], url_path="access-role")
     def access_role(self, request, pk=None):
         """Define o perfil de acesso (EMPLOYEE ou MANAGER) da conta da pessoa."""
@@ -192,7 +219,8 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
         person = request.user.person
         qs = (
             Route.objects.filter(is_active=True, vehicle__driver=person)
-            .select_related("company", "vehicle")
+            .filter(Q(service_date__isnull=True) | Q(service_date__gte=local_today()))
+            .select_related("company", "vehicle", "schedule")
             .prefetch_related(
                 Prefetch(
                     "stops",
@@ -211,7 +239,10 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
                     queryset=RouteEvent.objects.order_by("-timestamp"),
                 ),
             )
-            .order_by("id")
+            # Fixas primeiro, depois avulsas por data; dentro disso, turno mais cedo primeiro.
+            .order_by(
+                F("service_date").asc(nulls_first=True), F("schedule__time").asc(nulls_last=True), "id"
+            )
         )
         ser = DriverRouteBoardSerializer()
         return Response([ser.to_representation(r) for r in qs])
@@ -226,7 +257,7 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
         person = request.user.person
         route = get_object_or_404(
             Route.objects.filter(is_active=True, vehicle__driver=person)
-            .select_related("company", "vehicle")
+            .select_related("company", "vehicle", "schedule")
             .prefetch_related(
                 Prefetch(
                     "stops",
@@ -269,6 +300,35 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
 
     @action(
         detail=True,
+        methods=["post"],
+        url_path="location",
+        permission_classes=[IsAuthenticated, IsDriver],
+        throttle_classes=[VehicleLocationThrottle],
+    )
+    def location(self, request, pk=None):
+        """GPS do motorista em rota: guarda a última posição e repassa pelo WebSocket."""
+        route = get_object_or_404(
+            Route.objects.filter(is_active=True, vehicle__driver=request.user.person), pk=pk
+        )
+        serializer = LocationInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        location, _ = VehicleLocation.objects.update_or_create(
+            route=route,
+            defaults={
+                "latitude": round(Decimal(str(data["latitude"])), 6),
+                "longitude": round(Decimal(str(data["longitude"])), 6),
+                "heading": data.get("heading"),
+                "speed": data.get("speed"),
+                "accuracy": data.get("accuracy"),
+                "recorded_at": timezone.now(),
+            },
+        )
+        on_vehicle_location(location)
+        return Response(location_payload(location), status=status.HTTP_202_ACCEPTED)
+
+    @action(
+        detail=True,
         methods=["get"],
         url_path="navigation",
         permission_classes=[IsAuthenticated, IsDriver],
@@ -296,9 +356,24 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        origin = _address_to_location(
-            Address.objects.filter(is_active=True, person=person).first()
-        )
+        # ?origin=lat,lng: posição atual do motorista (GPS). Sem ela, parte do endereço dele.
+        origin_param = request.query_params.get("origin")
+        if origin_param:
+            origin = _parse_lat_lng(origin_param)
+            if origin is None:
+                return Response(
+                    {"detail": "Parâmetro origin inválido. Use origin=latitude,longitude."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            origin_source = "gps"
+        else:
+            origin = _address_to_location(
+                Address.objects.filter(is_active=True, person=person).first()
+            )
+            origin_source = "home"
+        # ?done_stops=1,2: paradas já atendidas nesta viagem; ficam fora do trajeto.
+        done_stop_ids = _parse_id_list(request.query_params.get("done_stops"))
+
         destination = _address_to_location(
             Address.objects.filter(
                 is_active=True,
@@ -313,12 +388,27 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
             )
             .first()
         )
+        route_stops = []
+        for stop in route.stops.all():
+            location = _address_to_location(
+                stop.meeting_point.address if stop.meeting_point else None
+            )
+            if location is None:
+                continue
+            route_stops.append(
+                {
+                    "id": stop.id,
+                    "sequence": stop.sequence,
+                    "title": stop.meeting_point.name,
+                    **location,
+                    "done": stop.id in done_stop_ids,
+                }
+            )
+        pending_stops = [stop for stop in route_stops if not stop["done"]]
         stops = [
-            _address_to_location(stop.meeting_point.address)
-            for stop in route.stops.all()
-            if stop.meeting_point and stop.meeting_point.address
+            {"latitude": stop["latitude"], "longitude": stop["longitude"]}
+            for stop in pending_stops
         ]
-        stops = [stop for stop in stops if stop is not None]
 
         if origin is None or destination is None:
             return Response(
@@ -358,11 +448,24 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
                 "distance_meters": route_data.get("distanceMeters"),
                 "distance_text": _format_distance(route_data.get("distanceMeters")),
                 "instruction": first_step,
+                "origin_source": origin_source,
                 "waypoints": {
                     "origin": origin,
                     "intermediates": stops,
                     "destination": destination,
                 },
+                "destination_name": route.company.name,
+                "stops": route_stops,
+                # Trecho i termina na i-ésima parada pendente; o último, no destino.
+                "legs": [
+                    {
+                        "stop_id": pending_stops[index]["id"] if index < len(pending_stops) else None,
+                        "distance_meters": leg.get("distanceMeters", 0),
+                        "duration_seconds": _duration_seconds(leg.get("duration")) or 0,
+                    }
+                    for index, leg in enumerate(legs)
+                ],
+                "steps": _navigation_steps(legs),
             }
         )
 
@@ -463,6 +566,12 @@ class RoutePassengerViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
                 )
         return super().partial_update(request, *args, **kwargs)
 
+    def perform_update(self, serializer):
+        previous_status = serializer.instance.boarding_status
+        super().perform_update(serializer)
+        if serializer.instance.boarding_status != previous_status:
+            on_boarding_status_changed(serializer.instance, by_passenger=False)
+
 
 class RouteStopViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     queryset = RouteStop.objects.select_related("route", "meeting_point", "meeting_point__address")
@@ -512,6 +621,87 @@ class VehicleViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     filterset_class = VehicleFilter
 
 
+class CollaboratorRouteViewSet(viewsets.GenericViewSet):
+    """
+    App do colaborador: as rotas em que ele é passageiro (`me/routes/`) e a
+    confirmação de presença (`PATCH me/routes/{route_passenger_id}/`).
+    """
+
+    permission_classes = [IsAuthenticated, IsPassengerPerson]
+    pagination_class = None
+    filter_backends = []
+
+    def get_queryset(self):
+        return (
+            RoutePassenger.objects.filter(
+                person=self.request.user.person, is_active=True, route__is_active=True
+            )
+            .filter(Q(route__service_date__isnull=True) | Q(route__service_date__gte=local_today()))
+            .select_related(
+                "route__company",
+                "route__vehicle__driver",
+                "route__current_location",
+                "route__schedule",
+                "route_stop__meeting_point__address",
+            )
+            .order_by(
+                F("route__service_date").asc(nulls_first=True),
+                F("route__schedule__time").asc(nulls_last=True),
+                "route__name",
+                "id",
+            )
+        )
+
+    def list(self, request):
+        serializer = CollaboratorRouteSerializer()
+        return Response([serializer.to_representation(rp) for rp in self.get_queryset()])
+
+    def partial_update(self, request, pk=None):
+        passenger = get_object_or_404(self.get_queryset(), pk=pk)
+        extra = set(request.data.keys()) - {"boarding_status"}
+        if extra:
+            raise ValidationError({"detail": "Só é possível alterar o boarding_status."})
+        serializer = BoardingStatusInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["boarding_status"]
+        if new_status != passenger.boarding_status:
+            passenger.boarding_status = new_status
+            passenger.save(update_fields=["boarding_status", "updated_at"])
+            on_boarding_status_changed(passenger, by_passenger=True)
+        return Response(CollaboratorRouteSerializer().to_representation(passenger))
+
+
+class NotificationViewSet(viewsets.GenericViewSet):
+    """Avisos da pessoa logada (qualquer perfil). `?unread=true` filtra as não lidas."""
+
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = []
+
+    def get_queryset(self):
+        return Notification.objects.filter(recipient=self.request.user.person)
+
+    def list(self, request):
+        qs = self.get_queryset()
+        if request.query_params.get("unread", "").lower() in ("1", "true"):
+            qs = qs.filter(read_at__isnull=True)
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response(self.get_serializer(page, many=True).data)
+
+    @action(detail=True, methods=["post"])
+    def read(self, request, pk=None):
+        notification = get_object_or_404(self.get_queryset(), pk=pk)
+        if notification.read_at is None:
+            notification.read_at = timezone.now()
+            notification.save(update_fields=["read_at"])
+        return Response(self.get_serializer(notification).data)
+
+    @action(detail=False, methods=["post"], url_path="read-all")
+    def read_all(self, request):
+        updated = self.get_queryset().filter(read_at__isnull=True).update(read_at=timezone.now())
+        return Response({"updated": updated})
+
+
 def _address_to_location(address):
     if not address or address.latitude is None or address.longitude is None:
         return None
@@ -547,6 +737,11 @@ def _compute_google_route(origin, destination, intermediates):
                 "routes.duration,"
                 "routes.distanceMeters,"
                 "routes.polyline.encodedPolyline,"
+                "routes.legs.duration,"
+                "routes.legs.distanceMeters,"
+                "routes.legs.steps.distanceMeters,"
+                "routes.legs.steps.startLocation,"
+                "routes.legs.steps.endLocation,"
                 "routes.legs.steps.navigationInstruction"
             ),
         },
@@ -567,13 +762,59 @@ def _first_navigation_step(legs):
     return "Siga a rota"
 
 
-def _format_duration(duration):
+def _navigation_steps(legs):
+    """Passos de todos os trechos, na ordem, com o índice do trecho e onde começam/terminam."""
+    steps = []
+    for leg_index, leg in enumerate(legs):
+        for step in leg.get("steps") or []:
+            instruction = step.get("navigationInstruction") or {}
+            start = (step.get("startLocation") or {}).get("latLng")
+            end = (step.get("endLocation") or {}).get("latLng")
+            if not start or not end:
+                continue
+            steps.append(
+                {
+                    "leg_index": leg_index,
+                    "instruction": instruction.get("instructions") or "Siga em frente",
+                    "maneuver": instruction.get("maneuver") or "",
+                    "distance_meters": step.get("distanceMeters", 0),
+                    "start": start,
+                    "end": end,
+                }
+            )
+    return steps
+
+
+def _parse_lat_lng(value):
+    try:
+        latitude, longitude = (float(part) for part in value.split(","))
+    except ValueError:
+        return None
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return None
+    return {"latitude": latitude, "longitude": longitude}
+
+
+def _parse_id_list(value):
+    if not value:
+        return set()
+    return {int(part) for part in value.split(",") if part.strip().isdigit()}
+
+
+def _duration_seconds(duration):
+    """A Routes API devolve durações como "123s"."""
     if not duration or not isinstance(duration, str) or not duration.endswith("s"):
         return None
 
     try:
-        seconds = int(float(duration[:-1]))
+        return int(float(duration[:-1]))
     except ValueError:
+        return None
+
+
+def _format_duration(duration):
+    seconds = _duration_seconds(duration)
+    if seconds is None:
         return None
 
     minutes = max(1, round(seconds / 60))

@@ -83,11 +83,21 @@ class RouteSerializer(BaseSerializer):
         model = Route
         fields = "__all__"
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        company = attrs.get("company") or getattr(self.instance, "company", None)
+        schedule = attrs["schedule"] if "schedule" in attrs else getattr(self.instance, "schedule", None)
+        if schedule is not None and company is not None and schedule.company_id != company.id:
+            raise serializers.ValidationError({"schedule": "O turno deve ser da mesma empresa da rota."})
+        return attrs
+
 
 class AddressSerializer(BaseSerializer):
     class Meta(BaseSerializer.Meta):
         model = Address
         fields = "__all__"
+        # Origem e precisão só são preenchidas pelo fluxo do colaborador no app (core.self_address).
+        read_only_fields = ("source", "precision", "accuracy_m", "created_by")
 
 
 class MeetingPointSerializer(BaseSerializer):

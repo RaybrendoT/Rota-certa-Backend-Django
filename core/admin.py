@@ -10,13 +10,16 @@ from .models import (
     Address,
     Company,
     MeetingPoint,
+    Notification,
     Person,
+    PlanningConversation,
     Route,
     RouteEvent,
     RoutePassenger,
     RouteStop,
     Schedule,
     Vehicle,
+    VehicleLocation,
 )
 
 admin.site.site_header = "Rota Certa"
@@ -354,13 +357,13 @@ class RoutePassengerInline(admin.TabularInline):
 
 @admin.register(Route)
 class RouteAdmin(BaseAdmin):
-    list_display = ("name", "company", "vehicle", "driver", "stops_count", "passengers_count", "events_link", "is_active")
-    list_filter = ("company",)
+    list_display = ("name", "company", "schedule", "service_date", "vehicle", "driver", "stops_count", "passengers_count", "events_link", "is_active")
+    list_filter = ("company", "schedule", "service_date")
     search_fields = ("name", "company__name", "vehicle__plate_number", "vehicle__driver__name")
-    list_select_related = ("company", "vehicle", "vehicle__driver")
+    list_select_related = ("company", "schedule", "vehicle", "vehicle__driver")
     autocomplete_fields = ("company", "vehicle")
     inlines = (RouteStopInline, RoutePassengerInline)
-    fieldsets = (("Rota", {"fields": ("company", "name", "vehicle")}), STATUS_FIELDSET)
+    fieldsets = (("Rota", {"fields": ("company", "name", "schedule", "service_date", "vehicle")}), STATUS_FIELDSET)
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
@@ -431,3 +434,48 @@ class RouteEventAdmin(BaseAdmin):
     @admin.display(description="mapa")
     def map_link(self, obj):
         return maps_link(obj.latitude, obj.longitude)
+
+
+# ====================== TEMPO REAL (app mobile) ======================
+
+
+class GeneratedByAppAdmin(admin.ModelAdmin):
+    """Registros gerados pelo app (GPS, avisos): só consulta no admin."""
+
+    list_per_page = 25
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(VehicleLocation)
+class VehicleLocationAdmin(GeneratedByAppAdmin):
+    list_display = ("route", "recorded_at", "speed", "accuracy", "map_link")
+    list_select_related = ("route",)
+    search_fields = ("route__name",)
+    ordering = ("-recorded_at",)
+
+    @admin.display(description="mapa")
+    def map_link(self, obj):
+        return maps_link(obj.latitude, obj.longitude)
+
+
+@admin.register(Notification)
+class NotificationAdmin(GeneratedByAppAdmin):
+    list_display = ("created_at", "recipient", "kind", "title", "route", "read_at")
+    list_filter = ("kind", "route__company")
+    list_select_related = ("recipient", "route")
+    search_fields = ("recipient__name", "title", "message")
+    date_hierarchy = "created_at"
+
+
+@admin.register(PlanningConversation)
+class PlanningConversationAdmin(GeneratedByAppAdmin):
+    list_display = ("id", "company", "created_by", "status", "input_tokens", "output_tokens", "updated_at")
+    list_filter = ("status", "company")
+    list_select_related = ("company", "created_by")
+    search_fields = ("created_by__name",)
+    date_hierarchy = "created_at"

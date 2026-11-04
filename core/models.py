@@ -290,6 +290,24 @@ class Route(BaseModel):
         verbose_name="veículo",
         help_text="Veículo (e motorista) atribuído à rota — usado pelo app do motorista.",
     )
+    schedule = models.ForeignKey(
+        "Schedule",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="routes",
+        verbose_name="turno",
+        help_text="Horário de chegada na empresa que esta rota atende. "
+        "Um mesmo motorista pode ter rotas em turnos diferentes.",
+    )
+    service_date = models.DateField(
+        "data (rota avulsa)",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Preenchida em rotas extras de um dia só (ex.: planejadas pelo assistente). "
+        "Vazia = rota fixa, que se repete nos dias do turno.",
+    )
 
     class Meta:
         verbose_name = "rota"
@@ -395,6 +413,35 @@ class Address(BaseModel):
     latitude = models.DecimalField("latitude", max_digits=9, decimal_places=6)
     longitude = models.DecimalField("longitude", max_digits=9, decimal_places=6)
 
+    class Source(models.TextChoices):
+        PANEL = "panel", "Cadastro no painel"
+        GPS = "gps", "Localização do colaborador (GPS)"
+        TYPED = "typed", "Digitado pelo colaborador"
+
+    neighborhood = models.CharField("bairro", max_length=100, blank=True, default="")
+    complement = models.CharField("complemento", max_length=100, blank=True, default="")
+    # Endereço residencial informado pelo próprio colaborador no app: origem, precisão e quem gravou.
+    # Ao trocar, o anterior fica inativo (histórico) em vez de ser apagado.
+    source = models.CharField("origem", max_length=10, choices=Source.choices, default=Source.PANEL)
+    accuracy_m = models.FloatField("precisão do GPS (m)", null=True, blank=True)
+    precision = models.CharField("precisão da localização", max_length=20, blank=True, default="")
+    created_by = models.ForeignKey(
+        "Person", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name="informado por"
+    )
+
+    class Review(models.TextChoices):
+        # Endereço enviado pelo app fica inativo até o gestor aprovar (o anterior continua valendo).
+        PENDING = "pending", "Aguardando aprovação"
+        APPROVED = "approved", "Aprovado"
+        REJECTED = "rejected", "Recusado"
+
+    review_status = models.CharField("aprovação", max_length=10, choices=Review.choices, blank=True, default="")
+    reviewed_by = models.ForeignKey(
+        "Person", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name="revisado por"
+    )
+    reviewed_at = models.DateTimeField("revisado em", null=True, blank=True)
+    review_note = models.CharField("observação da revisão", max_length=255, blank=True, default="")
+
     class Meta:
         verbose_name = "endereço"
         verbose_name_plural = "endereços"
@@ -407,6 +454,12 @@ class MeetingPoint(BaseModel):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='meeting_points', verbose_name="empresa")
     name = models.CharField("nome", max_length=255)
     address = models.ForeignKey(Address, on_delete=models.CASCADE, related_name='meeting_points', verbose_name="endereço")
+    # Embarque na porta de casa: criado quando nenhuma parada da rota fica perto do colaborador
+    # (core.home_pickup). Não entra nas buscas de "ponto mais próximo" nem no planejamento.
+    home_of = models.OneToOneField(
+        "Person", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="home_pickup_point", verbose_name="casa do colaborador",
+    )
 
     class Meta:
         verbose_name = "ponto de encontro"
@@ -537,3 +590,122 @@ class Vehicle(BaseModel):
 
     def __str__(self):
         return self.plate_number
+
+class VehicleLocation(models.Model):
+    """Última posição GPS conhecida do veículo em uma rota (uma linha por rota)."""
+
+    route = models.OneToOneField(
+        Route,
+        on_delete=models.CASCADE,
+        related_name="current_location",
+        verbose_name="rota",
+    )
+    latitude = models.DecimalField("latitude", max_digits=9, decimal_places=6)
+    longitude = models.DecimalField("longitude", max_digits=9, decimal_places=6)
+    heading = models.FloatField("direção (graus)", null=True, blank=True)
+    speed = models.FloatField("velocidade (m/s)", null=True, blank=True)
+    accuracy = models.FloatField("precisão (m)", null=True, blank=True)
+    recorded_at = models.DateTimeField("registrada em", default=timezone.now)
+
+    class Meta:
+        verbose_name = "localização do veículo"
+        verbose_name_plural = "localizações dos veículos"
+
+    def __str__(self):
+        return f"{self.route.name} @ {self.latitude},{self.longitude}"
+
+
+class Notification(models.Model):
+    """Aviso para uma pessoa; também é entregue em tempo real pelo WebSocket."""
+
+    class Kind(models.TextChoices):
+        ROUTE_DEPARTURE = "route_departure", "Rota iniciada"
+        ROUTE_ARRIVAL = "route_arrival", "Rota finalizada"
+        ROUTE_DELAY = "route_delay", "Atraso"
+        ROUTE_INCIDENT = "route_incident", "Incidente"
+        BUS_APPROACHING = "bus_approaching", "Ônibus chegando"
+        BUS_AT_STOP = "bus_at_stop", "Ônibus no ponto"
+        BOARDING_CONFIRMED = "boarding_confirmed", "Embarque confirmado"
+        BOARDING_ABSENT = "boarding_absent", "Ausência informada"
+        ROUTE_ASSIGNED = "route_assigned", "Nova rota"
+        ADDRESS_CHANGED = "address_changed", "Endereço para aprovar"
+        ADDRESS_APPROVED = "address_approved", "Endereço aprovado"
+        ADDRESS_REJECTED = "address_rejected", "Endereço recusado"
+        PICKUP_CHANGED = "pickup_changed", "Ponto de embarque alterado"
+        ROUTE_UPDATED = "route_updated", "Rota atualizada"
+
+    recipient = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+        verbose_name="destinatário",
+    )
+    route = models.ForeignKey(
+        Route,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notifications",
+        verbose_name="rota",
+    )
+    kind = models.CharField("tipo", max_length=30, choices=Kind.choices)
+    title = models.CharField("título", max_length=120)
+    message = models.TextField("mensagem", blank=True)
+    data = models.JSONField("dados extras", default=dict, blank=True)
+    created_at = models.DateTimeField("criada em", default=timezone.now, db_index=True)
+    read_at = models.DateTimeField("lida em", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "notificação"
+        verbose_name_plural = "notificações"
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["recipient", "read_at"])]
+
+    def __str__(self):
+        return f"{self.recipient.name}: {self.title}"
+
+
+class PlanningConversation(models.Model):
+    """
+    Conversa do gestor com o assistente de planejamento de rotas avulsas.
+
+    `messages` guarda o histórico no formato da API do Claude (inclusive chamadas e resultados
+    de ferramentas) para retomar a conversa; `draft` é o plano em rascunho, que só vira rotas
+    quando o gestor aprova (a IA nunca grava rotas sozinha).
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Em planejamento"
+        APPROVED = "approved", "Aprovado"
+
+    created_by = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="planning_conversations",
+        verbose_name="gestor",
+    )
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="planning_conversations",
+        verbose_name="empresa",
+    )
+    status = models.CharField("situação", max_length=20, choices=Status.choices, default=Status.DRAFT)
+    messages = models.JSONField("histórico", default=list, blank=True)
+    draft = models.JSONField("plano em rascunho", null=True, blank=True)
+    routes = models.ManyToManyField(
+        Route, blank=True, related_name="planning_conversations", verbose_name="rotas criadas"
+    )
+    input_tokens = models.PositiveIntegerField("tokens de entrada", default=0)
+    output_tokens = models.PositiveIntegerField("tokens de saída", default=0)
+    created_at = models.DateTimeField("criada em", auto_now_add=True)
+    updated_at = models.DateTimeField("atualizada em", auto_now=True)
+    approved_at = models.DateTimeField("aprovada em", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "planejamento com assistente"
+        verbose_name_plural = "planejamentos com assistente"
+        ordering = ["-updated_at", "-id"]
+
+    def __str__(self):
+        return f"Planejamento #{self.pk} ({self.get_status_display()})"

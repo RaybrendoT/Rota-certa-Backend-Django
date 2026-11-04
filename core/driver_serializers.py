@@ -1,16 +1,18 @@
 from rest_framework import serializers
 
 
-def _route_status_from_events(route):
-    """Heurística simples para UI (Em rota / Aguardando / Atrasado)."""
-    ev = route.events.order_by("-timestamp").first()
-    if not ev:
-        return "waiting"
-    if ev.event_type in ("delay", "incident"):
+def route_status_for_event_type(event_type):
+    """Heurística simples para UI (Em rota / Aguardando / Atrasado) a partir do último evento."""
+    if event_type in ("delay", "incident"):
         return "delayed"
-    if ev.event_type == "departure":
+    if event_type == "departure":
         return "in_route"
     return "waiting"
+
+
+def _route_status_from_events(route):
+    ev = route.events.order_by("-timestamp").first()
+    return route_status_for_event_type(ev.event_type) if ev else "waiting"
 
 
 class DriverRouteBoardSerializer(serializers.BaseSerializer):
@@ -77,6 +79,15 @@ class DriverRouteBoardSerializer(serializers.BaseSerializer):
             ),
             "route_status": _route_status_from_events(route),
             "eta_next_stop": None,
+            "schedule": schedule_payload(route.schedule),
+            "service_date": route.service_date.isoformat() if route.service_date else None,
             "stops": stops_out,
             "passengers": passengers_out,
         }
+
+
+def schedule_payload(schedule):
+    """Turno da rota: horário de chegada na empresa e dias da semana."""
+    if schedule is None:
+        return None
+    return {"id": schedule.id, "time": schedule.time.strftime("%H:%M"), "weekdays": schedule.weekdays}

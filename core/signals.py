@@ -6,7 +6,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .access_passwords import generate_initial_access_password
-from .models import AccessAccount, Company, Person
+from .models import AccessAccount, Company, Person, RouteEvent
+from .notifications import on_route_event_created
 
 logger = logging.getLogger(__name__)
 
@@ -165,3 +166,14 @@ def company_post_save_sync_access_emails(sender, instance, **kwargs):
 
     for person in persons:
         sync_access_account_email_for_person(person)
+
+
+@receiver(
+    post_save,
+    sender=RouteEvent,
+    dispatch_uid="core.route_event_realtime",
+)
+def route_event_post_save_notify(sender, instance, created, **kwargs):
+    # Vale para eventos criados pelo app do motorista, pelo painel ou pelo admin.
+    if created:
+        on_route_event_created(instance)

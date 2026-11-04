@@ -13,7 +13,9 @@ from .auth_views import (
     PasswordResetVerifyView,
 )
 from .viewsets import (
+    CollaboratorRouteViewSet,
     CompanyViewSet,
+    NotificationViewSet,
     PersonViewSet,
     RouteViewSet,
     RouteStopViewSet,
@@ -26,6 +28,8 @@ from .viewsets import (
     RouteEventViewSet,
     VehicleViewSet,
 )
+from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
+from .address_views import AddressReviewViewSet, CepLookupView, MyAddressPreviewView, MyAddressView
 
 router = DefaultRouter()
 router.register(r'companies', CompanyViewSet,basename='company')
@@ -40,12 +44,19 @@ router.register(r'employees', EmployeeViewSet,basename='employee')
 router.register(r'route-passengers', RoutePassengerViewSet,basename='routepassenger')
 router.register(r'route-events', RouteEventViewSet,basename='event')
 router.register(r"vehicles", VehicleViewSet,basename='vehicle')
+router.register(r"me/routes", CollaboratorRouteViewSet, basename='collaborator-route')
+router.register(r"notifications", NotificationViewSet, basename='notification')
+router.register(r"planning", PlanningConversationViewSet, basename='planning')
+router.register(r"address-reviews", AddressReviewViewSet, basename='address-review')
 
 urlpatterns = [
     path("auth/login/", LoginView.as_view(), name="auth-login"),
     path("auth/refresh/", AccessAccountTokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", AccessAccountTokenVerifyView.as_view(), name="auth-verify"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("me/address/", MyAddressView.as_view(), name="me-address"),
+    path("me/address/preview/", MyAddressPreviewView.as_view(), name="me-address-preview"),
+    path("me/address/cep/<str:cep>/", CepLookupView.as_view(), name="me-address-cep"),
     path(
         "auth/change-password/",
         ChangePasswordView.as_view(),
@@ -66,5 +77,7 @@ urlpatterns = [
         PasswordResetCompleteView.as_view(),
         name="auth-password-reset-reset",
     ),
+    path("pickup-suggestions/", PickupSuggestionsView.as_view(), name="pickup-suggestions"),
+    path("demand-map/", DemandMapView.as_view(), name="demand-map"),
     path("", include(router.urls)),
 ]

@@ -19,4 +19,5 @@ RUN useradd --system --uid 10001 app && chown -R app /app
 USER app
 
 EXPOSE 8000
-CMD ["gunicorn", "config.wsgi_prod:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "2", "--access-logfile", "-"]
+# ASGI (daphne): HTTP + WebSocket (/ws/stream/). Com mais de uma réplica, defina REDIS_URL.
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]

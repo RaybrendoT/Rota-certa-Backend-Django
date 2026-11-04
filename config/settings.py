@@ -18,6 +18,7 @@ if DEBUG:
 
 
 INSTALLED_APPS = [
+    "daphne",  # runserver em ASGI (WebSocket); precisa vir antes de staticfiles
     "jazzmin",  # tema do admin; precisa vir antes de django.contrib.admin
     'django.contrib.admin',
     'django.contrib.auth',
@@ -30,6 +31,7 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "corsheaders",
+    "channels",
     # Apps
     "core",
 ]
@@ -66,6 +68,22 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+# Channel layer do WebSocket: Redis quando REDIS_URL existir (obrigatório com mais de um
+# processo/pod); sem ela, memória do processo (desenvolvimento e testes).
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            # socket_timeout acima da espera bloqueante do channels_redis (BZPOPMIN de 5 s):
+            # com o padrão de 5 s do redis-py, toda leitura ociosa estoura e derruba o WebSocket.
+            'CONFIG': {'hosts': [{'address': REDIS_URL, 'socket_timeout': 30}]},
+        }
+    }
+else:
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
 
 
 def build_database_config(database_url: str):
@@ -172,6 +190,8 @@ if USE_HTTPS:
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+# config.asgi serve /static/ quando não há proxy/CDN na frente.
+SERVE_STATIC_FILES = config('SERVE_STATIC_FILES', default=True, cast=bool)
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = default_methods
 
@@ -197,7 +217,13 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
-        'user': '1000/hour'
+        'user': '1000/hour',
+        # GPS do motorista (app envia a cada ~5 s); escopo próprio para não esgotar o 'user'.
+        'vehicle_location': '120/min',
+        # Mensagens ao assistente de planejamento (cada uma pode virar várias chamadas pagas ao Claude).
+        'planning_message': '20/min',
+        # Conferência de endereço pelo colaborador (cada uma consulta a Geocoding API do Google).
+        'address_lookup': '30/hour',
     },
     # Atrás de proxy reverso (Traefik no k3s) o IP real vem em X-Forwarded-For; sem isso
     # todos os clientes dividem o mesmo contador de throttle. Defina NUM_PROXIES=1 no deploy.
@@ -260,6 +286,10 @@ GOOGLE_ROUTES_API_URL = config(
     "GOOGLE_ROUTES_API_URL",
     default="https://routes.googleapis.com/directions/v2:computeRoutes",
 )
+
+# Assistente de planejamento de rotas (Claude). Sem chave, o endpoint responde 503.
+ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
+PLANNING_MODEL = config("PLANNING_MODEL", default="claude-opus-5-5")
 
 # ====================== ADMIN (Django admin + Jazzmin) ======================
 # Idioma e fuso só do /admin (core.middleware.AdminLocaleMiddleware); a API segue en-us/UTC.

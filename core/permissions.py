@@ -69,3 +69,13 @@ def is_manager(request) -> bool:
 def route_belongs_to_driver(route, person) -> bool:
     """A rota é do motorista quando o veículo atribuído a ela é dele."""
     return bool(route.vehicle_id and route.vehicle.driver_id == person.id)
+
+
+class IsPassengerPerson(permissions.BasePermission):
+    """Pessoa do tipo EMPLOYEE (passageiro), qualquer que seja o perfil da conta."""
+
+    message = "Apenas colaboradores (passageiros) podem acessar este recurso."
+
+    def has_permission(self, request, view):
+        person = getattr(request.user, "person", None)
+        return person is not None and person.type == "EMPLOYEE"
