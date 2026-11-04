@@ -1,0 +1,226 @@
+# CI/CD do backend: lint → testes → build da imagem → push no GHCR → deploy na EC2.
+#
+# - Pull request: lint, testes e build da imagem (sem publicar nem fazer deploy).
+# - Push na main: tudo, e o deploy roda o deploy/deploy.sh na EC2 por SSH.
+# - Actions → CI/CD → Run workflow: o mesmo da main, com a opção de pular o deploy.
+#
+# Configuração (Settings → Secrets and variables → Actions), ver deploy/README.md, seção 6:
+#   Variables: EC2_HOST (obrigatória p/ o deploy), EC2_USER (padrão ubuntu), DEPLOY_DOMAIN
+#              (para conferir /api/health/ no fim), DEPLOY_PATH (padrão ~/rotacerta/rota-certa-backend-django)
+#   Secrets:   EC2_SSH_KEY (chave privada .pem), EC2_SSH_KNOWN_HOSTS (opcional, saída do ssh-keyscan)
+# Sem EC2_HOST o pipeline para depois de publicar a imagem.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Fazer o deploy na EC2 depois de publicar a imagem
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  # Em PR, um push novo cancela a execução antiga. Na main, nunca cancela um deploy no meio.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.17.3
+      - run: ruff check --output-format=github .
+
+  test:
+    name: Testes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # O projeto só roda em PostgreSQL (sem fallback para SQLite).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: route_monitoring
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Valores só para o CI; não há .env no runner.
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-0123456789
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/route_monitoring
+      DEBUG: "False"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verificar configuração do Django
+        run: python manage.py check
+
+      - name: Verificar migrações pendentes
+        # Falha se algum model mudou sem a migração correspondente.
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Rodar testes
+        run: python manage.py test --verbosity 2
+
+      - name: Smoke test do seed de demonstração
+        run: |
+          python manage.py migrate --verbosity 0
+          python manage.py seed_manaus_demo
+
+  build:
+    name: Build e push da imagem
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      image: ${{ steps.vars.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nome da imagem e tag
+        id: vars
+        run: |
+          # O GHCR só aceita nomes em minúsculas.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (e push fora de PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}:latest', steps.vars.outputs.image) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy na EC2
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/main'
+      && github.event_name != 'pull_request'
+      && vars.EC2_HOST != ''
+      && (github.event_name == 'push' || inputs.deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: ${{ vars.DEPLOY_DOMAIN && format('https://{0}/', vars.DEPLOY_DOMAIN) || '' }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      EC2_HOST: ${{ vars.EC2_HOST }}
+      EC2_USER: ${{ vars.EC2_USER || 'ubuntu' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '~/rotacerta/rota-certa-backend-django' }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - name: Chave SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::Falta o secret EC2_SSH_KEY (chave privada da EC2)."
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ec2 && chmod 600 ~/.ssh/ec2
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::Sem EC2_SSH_KNOWN_HOSTS: confiando na chave do servidor lida agora (ssh-keyscan)."
+            ssh-keyscan -T 15 -H "$EC2_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Login do servidor no GHCR
+        # O token do job vale só durante a execução: o servidor faz login, baixa a imagem
+        # e o deploy.sh termina com logout (ver passo seguinte).
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/ec2 "$EC2_USER@$EC2_HOST" \
+            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
+      - name: Rodar deploy/deploy.sh
+        run: |
+          ssh -i ~/.ssh/ec2 "$EC2_USER@$EC2_HOST" \
+            "cd $DEPLOY_PATH && BACKEND_IMAGE='${{ needs.build.outputs.image }}' bash deploy/deploy.sh '$TAG'; status=\$?; docker logout ghcr.io >/dev/null; exit \$status"
+
+      - name: Conferir /api/health/
+        if: vars.DEPLOY_DOMAIN != ''
+        run: |
+          url="https://${{ vars.DEPLOY_DOMAIN }}/api/health/"
+          # O container migra e roda o collectstatic antes do gunicorn: dá até ~2 min.
+          for i in $(seq 1 24); do
+            if body=$(curl -fsS --max-time 10 "$url"); then
+              echo "$body"
+              exit 0
+            fi
+            echo "Ainda subindo ($i/24)..."
+            sleep 5
+          done
+          echo "::error::$url não respondeu 200 depois do deploy. Veja: docker compose logs backend"
+          exit 1
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "### Deploy"
+            echo "- Imagem: \`${{ needs.build.outputs.image }}:$TAG\`"
+            echo "- Servidor: \`$EC2_HOST\`"
+            echo "- Rollback: \`bash deploy/deploy.sh sha-<commit anterior>\` na EC2"
+          } >> "$GITHUB_STEP_SUMMARY"

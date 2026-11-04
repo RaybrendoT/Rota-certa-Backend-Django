@@ -2,6 +2,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .address_views import AddressReviewViewSet, CepLookupView, MyAddressPreviewView, MyAddressView
 from .auth_views import (
     AccessAccountTokenRefreshView,
     AccessAccountTokenVerifyView,
@@ -12,24 +13,24 @@ from .auth_views import (
     PasswordResetRequestView,
     PasswordResetVerifyView,
 )
+from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
+from .views import HealthView
 from .viewsets import (
+    AddressViewSet,
     CollaboratorRouteViewSet,
     CompanyViewSet,
-    NotificationViewSet,
-    PersonViewSet,
-    RouteViewSet,
-    RouteStopViewSet,
-    ScheduleViewSet,
-    AddressViewSet,
-    MeetingPointViewSet,
     DriverViewSet,
     EmployeeViewSet,
-    RoutePassengerViewSet,
+    MeetingPointViewSet,
+    NotificationViewSet,
+    PersonViewSet,
     RouteEventViewSet,
+    RoutePassengerViewSet,
+    RouteStopViewSet,
+    RouteViewSet,
+    ScheduleViewSet,
     VehicleViewSet,
 )
-from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
-from .address_views import AddressReviewViewSet, CepLookupView, MyAddressPreviewView, MyAddressView
 
 router = DefaultRouter()
 router.register(r'companies', CompanyViewSet,basename='company')
@@ -50,6 +51,7 @@ router.register(r"planning", PlanningConversationViewSet, basename='planning')
 router.register(r"address-reviews", AddressReviewViewSet, basename='address-review')
 
 urlpatterns = [
+    path("health/", HealthView.as_view(), name="health"),
     path("auth/login/", LoginView.as_view(), name="auth-login"),
     path("auth/refresh/", AccessAccountTokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", AccessAccountTokenVerifyView.as_view(), name="auth-verify"),

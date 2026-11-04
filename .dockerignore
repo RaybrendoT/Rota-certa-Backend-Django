@@ -11,3 +11,9 @@ db.sqlite3
 *.log
 staticfiles
 docs
+deploy
+*.sqlite3
+.ruff_cache
+.github
+.vscode
+whatsapp_qrcode.png

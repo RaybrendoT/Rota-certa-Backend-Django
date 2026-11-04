@@ -20,4 +20,7 @@ USER app
 
 EXPOSE 8000
 # ASGI (daphne): HTTP + WebSocket (/ws/stream/). Com mais de uma réplica, defina REDIS_URL.
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
+# Aplica as migrações a cada subida (no deploy automático, a versão nova migra o banco).
+# --proxy-headers: atrás do Caddy, o IP do cliente vem do X-Forwarded-For.
+# MIGRATE_ON_START=0 desliga a migração (ex.: para rodar várias réplicas).
+CMD ["sh", "-c", "if [ \"${MIGRATE_ON_START:-1}\" = 1 ]; then python manage.py migrate --noinput; fi && exec daphne -b 0.0.0.0 -p 8000 --proxy-headers config.asgi:application"]
