@@ -13,6 +13,7 @@ from .auth_views import (
     PasswordResetRequestView,
     PasswordResetVerifyView,
 )
+from .dashboard import DashboardSummaryView
 from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
 from .push_views import PushDeviceUnregisterView, PushDeviceView
 from .views import HealthView
@@ -84,5 +85,6 @@ urlpatterns = [
     ),
     path("pickup-suggestions/", PickupSuggestionsView.as_view(), name="pickup-suggestions"),
     path("demand-map/", DemandMapView.as_view(), name="demand-map"),
+    path("dashboard/summary/", DashboardSummaryView.as_view(), name="dashboard-summary"),
     path("", include(router.urls)),
 ]
