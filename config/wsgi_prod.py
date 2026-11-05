@@ -4,10 +4,10 @@ WhiteNoise, para o container não depender de um nginx só para /static/.
 
 Uso: gunicorn config.wsgi_prod:application
 """
-from config.wsgi import application as django_application
-
 from django.conf import settings
 from whitenoise import WhiteNoise
+
+from config.wsgi import application as django_application
 
 application = WhiteNoise(
     django_application,

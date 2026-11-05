@@ -7,9 +7,9 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from core import address_review, self_address
+from core.geocoding import GeocodingUnavailable, lookup_cep
 from core.models import Address
 from core.permissions import IsManager
-from core.geocoding import GeocodingUnavailable, lookup_cep
 
 
 class AddressLookupThrottle(UserRateThrottle):

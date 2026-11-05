@@ -8,8 +8,8 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from core.models import PlanningConversation, Schedule
-from core.pickup_points import demand_map, suggest_pickup_points
 from core.permissions import IsManager
+from core.pickup_points import demand_map, suggest_pickup_points
 from core.planning.agent import AssistantUnavailable, PlanningAgent, transcript
 from core.planning.employee_list import MAX_BYTES, EmployeeListError, match_employee_list
 from core.planning.planner import Planner, PlanningError

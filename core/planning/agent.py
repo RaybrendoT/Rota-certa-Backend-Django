@@ -12,8 +12,8 @@ import logging
 import anthropic
 from django.conf import settings
 
-from core.models import PlanningConversation
 from core.dates import local_today
+from core.models import PlanningConversation
 from core.planning.planner import WEEKDAY_NAMES, Planner, PlanningError
 
 logger = logging.getLogger(__name__)

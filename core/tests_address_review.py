@@ -2,7 +2,18 @@
 from datetime import time
 from decimal import Decimal
 
-from core.models import AccessAccount, Address, MeetingPoint, Notification, PlanningConversation, Route, RoutePassenger, RouteStop, Schedule, Vehicle
+from core.models import (
+    AccessAccount,
+    Address,
+    MeetingPoint,
+    Notification,
+    PlanningConversation,
+    Route,
+    RoutePassenger,
+    RouteStop,
+    Schedule,
+    Vehicle,
+)
 from core.planning.planner import Planner
 from core.tests import RoleTestCase
 
@@ -186,6 +197,7 @@ class AddressReviewTests(RoleTestCase):
 
     def test_comando_adiciona_pontos_reais_sem_duplicar(self):
         from io import StringIO
+
         from django.core.management import call_command
         out = StringIO()
         call_command("add_manaus_meeting_points", company=[self.company.name], stdout=out)
@@ -197,6 +209,7 @@ class AddressReviewTests(RoleTestCase):
 
     def test_comando_aplica_regra_aos_passageiros_antigos(self):
         from io import StringIO
+
         from django.core.management import call_command
         # Fulano mora perto do Norte e embarca no Norte (mantém); a gestora mora perto do Centro mas embarca longe.
         address(*NEW_HOME, person=self.manager_person)
