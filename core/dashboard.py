@@ -23,8 +23,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .address_review import review_queryset
 from .dates import local_today
-from .models import Route, RouteEvent, RoutePassenger
+from .models import Address, Route, RouteEvent, RoutePassenger
 from .permissions import IsManager
 
 WEEKDAY_CODES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
@@ -47,11 +48,11 @@ def routes_of_day(company, day: date):
         route
         for route in Route.objects.filter(
             company=company, is_active=True, service_date__isnull=True, schedule__isnull=False, schedule__is_active=True
-        ).select_related("schedule", "vehicle")
+        ).select_related("schedule", "vehicle__driver")
         if weekday in (route.schedule.weekdays if isinstance(route.schedule.weekdays, list) else [route.schedule.weekdays])
     ]
     extra = list(
-        Route.objects.filter(company=company, is_active=True, service_date=day).select_related("schedule", "vehicle")
+        Route.objects.filter(company=company, is_active=True, service_date=day).select_related("schedule", "vehicle__driver")
     )
     return fixed + extra
 
@@ -175,3 +176,116 @@ class DashboardSummaryView(APIView):
         query.is_valid(raise_exception=True)
         day = query.validated_data.get("date") or local_today()
         return Response(dashboard_summary(request.user.person.company, day))
+
+
+# ---------------------------------------------------------------------------
+# Alertas: GET dashboard/alerts/?date=AAAA-MM-DD — o que pede ação do gestor no dia.
+#
+# - address_reviews: endereços enviados pelos colaboradores aguardando aprovação (não depende do dia);
+# - incidents: incidentes registrados nas rotas do dia;
+# - delays: rotas com atraso registrado e, só no dia de hoje, rotas que passaram do horário do
+#   turno (mais a tolerância) sem chegada registrada;
+# - unassigned: rotas do dia sem veículo ou com veículo sem motorista.
+# Cada grupo traz o total e todos os itens (o painel mostra os primeiros e expande o resto).
+# ---------------------------------------------------------------------------
+def _hhmm(value, tz):
+    return value.astimezone(tz).strftime("%H:%M")
+
+
+def _group(kind, items):
+    return {"kind": kind, "count": len(items), "items": items}
+
+
+def dashboard_alerts(company, day: date, now=None) -> dict:
+    tz = ZoneInfo(settings.ADMIN_TIME_ZONE)
+    now = (now or timezone.now()).astimezone(tz)
+    start, end = _local_day_bounds(day)
+    routes = routes_of_day(company, day)
+    by_id = {route.id: route for route in routes}
+
+    pending = review_queryset(company).filter(review_status=Address.Review.PENDING).order_by("created_at", "id")
+    address_items = [
+        {"id": address.id, "person_name": address.person.name, "time": address.created_at.isoformat()}
+        for address in pending
+    ]
+
+    events = (
+        RouteEvent.objects.filter(
+            route_id__in=by_id, is_active=True, timestamp__gte=start, timestamp__lt=end,
+            event_type__in=("arrival", "delay", "incident"),
+        )
+        .order_by("timestamp", "id")
+        .values_list("id", "route_id", "event_type", "description", "timestamp")
+    )
+    arrived, delayed, incident_items = set(), {}, []
+    for event_id, route_id, event_type, description, timestamp in events:
+        if event_type == "arrival":
+            arrived.add(route_id)
+        elif event_type == "delay":
+            delayed.setdefault(route_id, (timestamp, description))
+        else:
+            incident_items.append({
+                "id": event_id, "route_id": route_id, "route_name": by_id[route_id].name,
+                "time": _hhmm(timestamp, tz), "description": description,
+            })
+
+    delay_items = [
+        {
+            "route_id": route_id, "route_name": by_id[route_id].name, "reason": "reported",
+            "time": _hhmm(timestamp, tz), "description": description,
+        }
+        for route_id, (timestamp, description) in delayed.items()
+    ]
+    if day == now.date():
+        overdue = []
+        for route in routes:
+            if route.id in arrived or route.id in delayed or not route.schedule_id:
+                continue
+            deadline = datetime.combine(day, route.schedule.time, tzinfo=tz) + timedelta(
+                minutes=ON_TIME_TOLERANCE_MINUTES
+            )
+            if now > deadline:
+                overdue.append((route.schedule.time, route.name, {
+                    "route_id": route.id, "route_name": route.name, "reason": "overdue",
+                    "time": route.schedule.time.strftime("%H:%M"), "description": "",
+                }))
+        delay_items += [item for _, _, item in sorted(overdue, key=lambda x: (x[0], x[1]))]
+
+    unassigned_items = []
+    for route in sorted(routes, key=lambda r: (r.schedule.time if r.schedule_id else datetime.max.time(), r.name)):
+        vehicle = route.vehicle if route.vehicle_id and route.vehicle.is_active else None
+        if vehicle is None:
+            reason = "no_vehicle"
+        elif vehicle.driver is None or not vehicle.driver.is_active:
+            reason = "no_driver"
+        else:
+            continue
+        unassigned_items.append({
+            "route_id": route.id, "route_name": route.name, "reason": reason,
+            "time": route.schedule.time.strftime("%H:%M") if route.schedule_id else None,
+        })
+
+    groups = [
+        _group("incidents", incident_items),
+        _group("delays", delay_items),
+        _group("unassigned", unassigned_items),
+        _group("address_reviews", address_items),
+    ]
+    return {
+        "date": day.isoformat(),
+        "generated_at": timezone.now().isoformat(),
+        "total": sum(group["count"] for group in groups),
+        "groups": groups,
+    }
+
+
+class DashboardAlertsView(APIView):
+    """GET dashboard/alerts/?date=AAAA-MM-DD — pendências que pedem ação do gestor."""
+
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def get(self, request):
+        query = DashboardSummaryQuery(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        day = query.validated_data.get("date") or local_today()
+        return Response(dashboard_alerts(request.user.person.company, day))
