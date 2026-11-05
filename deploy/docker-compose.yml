@@ -72,6 +72,8 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Servido em /download/ (ver Caddyfile e downloads/README.md).
+      - ./downloads:/srv/downloads:ro
       - caddy_data:/data
       - caddy_config:/config
 
