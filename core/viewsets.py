@@ -17,6 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
+from .boarding import record_boarding
 from .dates import local_today
 from .driver_serializers import DriverRouteBoardSerializer
 from .filters import (
@@ -570,6 +571,7 @@ class RoutePassengerViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
         previous_status = serializer.instance.boarding_status
         super().perform_update(serializer)
         if serializer.instance.boarding_status != previous_status:
+            record_boarding(serializer.instance, marked_by=self.request.user.person)
             on_boarding_status_changed(serializer.instance, by_passenger=False)
 
 
@@ -667,6 +669,7 @@ class CollaboratorRouteViewSet(viewsets.GenericViewSet):
         if new_status != passenger.boarding_status:
             passenger.boarding_status = new_status
             passenger.save(update_fields=["boarding_status", "updated_at"])
+            record_boarding(passenger, marked_by=request.user.person)
             on_boarding_status_changed(passenger, by_passenger=True)
         return Response(CollaboratorRouteSerializer().to_representation(passenger))
 

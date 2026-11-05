@@ -531,6 +531,43 @@ class RoutePassenger(BaseModel):
         self.full_clean()
         super().save(*args, **kwargs)
 
+
+class BoardingRecord(models.Model):
+    """
+    Embarque do passageiro num dia: o status com que ele terminou aquela data.
+
+    RoutePassenger.boarding_status guarda só o status atual, sem data; este registro
+    (um por passageiro da rota por dia) é a base do resumo do dia e do histórico.
+    """
+
+    route_passenger = models.ForeignKey(
+        RoutePassenger, on_delete=models.CASCADE, related_name="boarding_records", verbose_name="passageiro da rota",
+    )
+    route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="boarding_records", verbose_name="rota")
+    person = models.ForeignKey(
+        "Person", on_delete=models.CASCADE, related_name="boarding_records", verbose_name="passageiro",
+    )
+    service_date = models.DateField("data", db_index=True)
+    status = models.CharField("status de embarque", max_length=20, choices=RoutePassenger.BoardingStatus.choices)
+    marked_by = models.ForeignKey(
+        "Person", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+        verbose_name="marcado por", help_text="Motorista ou o próprio colaborador; vazio = admin ou importação.",
+    )
+    created_at = models.DateTimeField("criado em", default=timezone.now, editable=False)
+    updated_at = models.DateTimeField("atualizado em", default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "embarque do dia"
+        verbose_name_plural = "embarques do dia"
+        constraints = [
+            models.UniqueConstraint(fields=["route_passenger", "service_date"], name="uniq_boarding_per_day"),
+        ]
+        indexes = [models.Index(fields=["route", "service_date"])]
+
+    def __str__(self):
+        return f"{self.person_id} · {self.route_id} · {self.service_date}: {self.status}"
+
+
 class RouteEvent(BaseModel):
     EVENT_TYPE_CHOICES = [
         ('departure', 'Partida'),

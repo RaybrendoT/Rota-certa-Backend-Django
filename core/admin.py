@@ -5,9 +5,11 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from .access_passwords import generate_initial_access_password
+from .boarding import record_boarding
 from .models import (
     AccessAccount,
     Address,
+    BoardingRecord,
     Company,
     MeetingPoint,
     Notification,
@@ -410,6 +412,11 @@ class RoutePassengerAdmin(BaseAdmin):
     autocomplete_fields = ("person", "route", "route_stop")
     fieldsets = (("Passageiro", {"fields": ("route", "person", "route_stop", "boarding_status")}), STATUS_FIELDSET)
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if "boarding_status" in form.changed_data:
+            record_boarding(obj)  # marcado pelo admin: sem pessoa
+
 
 @admin.register(RouteEvent)
 class RouteEventAdmin(BaseAdmin):
@@ -462,6 +469,16 @@ class VehicleLocationAdmin(GeneratedByAppAdmin):
     @admin.display(description="mapa")
     def map_link(self, obj):
         return maps_link(obj.latitude, obj.longitude)
+
+
+@admin.register(BoardingRecord)
+class BoardingRecordAdmin(GeneratedByAppAdmin):
+    list_display = ("service_date", "person", "route", "status", "marked_by", "updated_at")
+    list_filter = ("status", "service_date", "route__company")
+    list_select_related = ("person", "route", "marked_by")
+    search_fields = ("person__name", "person__employee_code", "route__name")
+    date_hierarchy = "service_date"
+    ordering = ("-service_date", "-updated_at")
 
 
 @admin.register(Notification)

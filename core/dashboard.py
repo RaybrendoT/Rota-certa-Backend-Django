@@ -8,8 +8,8 @@ tem dia definido e fica de fora.
 O status de cada rota sai dos eventos registrados pelo motorista naquela data (fuso da
 operação): sem partida = não iniciada; partida sem chegada = em andamento; chegada = finalizada.
 
-O status de embarque (RoutePassenger.boarding_status) não guarda a data. Só conta como
-confirmado/ausente no dia quando foi alterado naquele dia; senão o passageiro está pendente.
+Embarques e ausências vêm do BoardingRecord do dia (core.boarding): o passageiro sem registro
+naquela data está pendente.
 
 Pontualidade: rota finalizada cuja chegada aconteceu até o horário do turno mais a tolerância.
 """
@@ -25,7 +25,7 @@ from rest_framework.views import APIView
 
 from .address_review import review_queryset
 from .dates import local_today
-from .models import Address, Route, RouteEvent, RoutePassenger, RouteStop, VehicleLocation
+from .models import Address, BoardingRecord, Route, RouteEvent, RoutePassenger, RouteStop, VehicleLocation
 from .permissions import IsManager
 from .realtime_serializers import location_payload
 
@@ -80,14 +80,16 @@ def dashboard_summary(company, day: date) -> dict:
             incidents += 1
 
     passengers_by_route = {route_id: {"expected": 0, "confirmed": 0, "absent": 0} for route_id in route_ids}
-    passengers = RoutePassenger.objects.filter(
+    passenger_ids = {}
+    for passenger_id, route_id in RoutePassenger.objects.filter(
         route_id__in=route_ids, is_active=True, person__is_active=True
-    ).values_list("route_id", "boarding_status", "updated_at")
-    for route_id, boarding_status, updated_at in passengers:
-        counts = passengers_by_route[route_id]
-        counts["expected"] += 1
-        if start <= updated_at < end and boarding_status in ("confirmed", "absent"):
-            counts[boarding_status] += 1
+    ).values_list("id", "route_id"):
+        passenger_ids[passenger_id] = route_id
+        passengers_by_route[route_id]["expected"] += 1
+    for passenger_id, record_status in BoardingRecord.objects.filter(
+        route_passenger_id__in=passenger_ids, service_date=day, status__in=("confirmed", "absent")
+    ).values_list("route_passenger_id", "status"):
+        passengers_by_route[passenger_ids[passenger_id]][record_status] += 1
 
     shifts = {}
     totals = {"not_started": 0, "in_progress": 0, "finished": 0, "without_vehicle": 0}
@@ -296,7 +298,7 @@ class DashboardAlertsView(APIView):
 # Feed: GET dashboard/feed/?date=AAAA-MM-DD — o que aconteceu nas rotas da empresa no dia,
 # do mais novo para o mais antigo. Mesmo formato das mensagens route_event e boarding_status
 # do WebSocket (/ws/stream/), para o painel abrir preenchido e seguir ao vivo.
-# Embarques: como o status não guarda data, entram os passageiros alterados no dia.
+# Embarques: os BoardingRecord do dia (último status de cada passageiro naquela data).
 # ---------------------------------------------------------------------------
 FEED_LIMIT = 40
 
@@ -311,9 +313,9 @@ def dashboard_feed(company, day: date, limit: int = FEED_LIMIT) -> dict:
         .order_by("-timestamp", "-id")[:limit]
     )
     boardings = (
-        RoutePassenger.objects.filter(
-            route__company=company, route__is_active=True, is_active=True,
-            boarding_status__in=("confirmed", "absent"), updated_at__gte=start, updated_at__lt=end,
+        BoardingRecord.objects.filter(
+            route__company=company, route__is_active=True, route_passenger__is_active=True,
+            service_date=day, status__in=("confirmed", "absent"),
         )
         .select_related("route", "person")
         .order_by("-updated_at", "-id")[:limit]
@@ -327,12 +329,12 @@ def dashboard_feed(company, day: date, limit: int = FEED_LIMIT) -> dict:
         for event in events
     ] + [
         {
-            "type": "boarding_status", "route_passenger_id": passenger.id, "route_id": passenger.route_id,
-            "route_name": passenger.route.name, "person_id": passenger.person_id,
-            "person_name": passenger.person.name, "status": passenger.boarding_status,
-            "timestamp": passenger.updated_at.isoformat(),
+            "type": "boarding_status", "route_passenger_id": record.route_passenger_id, "route_id": record.route_id,
+            "route_name": record.route.name, "person_id": record.person_id,
+            "person_name": record.person.name, "status": record.status,
+            "timestamp": record.updated_at.isoformat(),
         }
-        for passenger in boardings
+        for record in boardings
     ]
     items.sort(key=lambda item: item["timestamp"], reverse=True)
     return {"date": day.isoformat(), "items": items[:limit]}

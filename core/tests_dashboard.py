@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 
 from core.dashboard import dashboard_alerts
-from core.models import Address, Route, RouteEvent, RoutePassenger, Schedule
+from core.models import Address, BoardingRecord, Route, RouteEvent, RoutePassenger, Schedule
 from core.tests import RoleTestCase
 
 URL = "/api/dashboard/summary/"
@@ -31,6 +31,14 @@ class DashboardTestCase(RoleTestCase):
             route=route, event_type=event_type, latitude=Decimal("-3.1"), longitude=Decimal("-60.0")
         )
         RouteEvent.objects.filter(pk=ev.pk).update(timestamp=when)
+
+    def board(self, passenger, status, when):
+        """Embarque registrado naquele dia (como core.boarding.record_boarding faria)."""
+        RoutePassenger.objects.filter(pk=passenger.pk).update(boarding_status=status, updated_at=when)
+        return BoardingRecord.objects.create(
+            route_passenger=passenger, route_id=passenger.route_id, person_id=passenger.person_id,
+            service_date=when.date(), status=status, created_at=when, updated_at=when,
+        )
 
 
 class DashboardSummaryTests(DashboardTestCase):
@@ -77,18 +85,14 @@ class DashboardSummaryTests(DashboardTestCase):
         self.assertEqual(data["routes"]["in_progress"], 1)
         self.assertIsNone(data["punctuality"]["rate"])
 
-    def test_embarques_contam_so_quando_alterados_no_dia(self):
+    def test_embarques_contam_pelo_registro_do_dia(self):
         second = self.employee(self.company, "Beltrano", "E002")
         third = self.employee(self.company, "Ciclano", "E003")
-        RoutePassenger.objects.filter(pk=self.passenger.pk).update(
-            boarding_status="confirmed", updated_at=at(THURSDAY, 5, 20)
-        )
+        self.board(self.passenger, "confirmed", at(THURSDAY, 5, 20))
         absent = RoutePassenger.objects.create(person=second, route=self.route)
-        RoutePassenger.objects.filter(pk=absent.pk).update(boarding_status="absent", updated_at=at(THURSDAY, 4, 0))
+        self.board(absent, "absent", at(THURSDAY, 4, 0))
         old = RoutePassenger.objects.create(person=third, route=self.route)
-        RoutePassenger.objects.filter(pk=old.pk).update(
-            boarding_status="confirmed", updated_at=at(THURSDAY - timedelta(days=1), 5, 20)
-        )
+        self.board(old, "confirmed", at(THURSDAY - timedelta(days=1), 5, 20))  # outro dia: pendente hoje
 
         data = self.get()
         self.assertEqual(data["passengers"], {"expected": 3, "confirmed": 1, "absent": 1, "pending": 1})
@@ -200,12 +204,8 @@ class DashboardFeedTests(DashboardTestCase):
         self.event(self.route, "incident", at(THURSDAY, 5, 30))
         self.event(self.route, "arrival", at(THURSDAY - timedelta(days=1), 6, 0))  # outro dia
         self.event(self.other_route, "departure", at(THURSDAY, 5, 10))  # outra empresa
-        RoutePassenger.objects.filter(pk=self.passenger.pk).update(
-            boarding_status="confirmed", updated_at=at(THURSDAY, 5, 20)
-        )
-        RoutePassenger.objects.filter(pk=self.other_passenger.pk).update(
-            boarding_status="absent", updated_at=at(THURSDAY, 5, 25)
-        )
+        self.board(self.passenger, "confirmed", at(THURSDAY, 5, 20))
+        self.board(self.other_passenger, "absent", at(THURSDAY, 5, 25))  # outra empresa
 
         r = self.client_for(self.manager_person).get(FEED_URL, {"date": THURSDAY.isoformat()})
         self.assertEqual(r.status_code, 200, r.content)
@@ -218,7 +218,7 @@ class DashboardFeedTests(DashboardTestCase):
         self.assertEqual(items[0]["route_name"], "Rota A")
 
     def test_embarque_pendente_nao_entra(self):
-        RoutePassenger.objects.filter(pk=self.passenger.pk).update(updated_at=at(THURSDAY, 5, 20))
+        self.board(self.passenger, "pending", at(THURSDAY, 5, 20))
         r = self.client_for(self.manager_person).get(FEED_URL, {"date": THURSDAY.isoformat()})
         self.assertEqual(r.json()["items"], [])
 
