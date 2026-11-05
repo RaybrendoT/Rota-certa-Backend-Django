@@ -25,8 +25,9 @@ from rest_framework.views import APIView
 
 from .address_review import review_queryset
 from .dates import local_today
-from .models import Address, Route, RouteEvent, RoutePassenger
+from .models import Address, Route, RouteEvent, RoutePassenger, RouteStop, VehicleLocation
 from .permissions import IsManager
+from .realtime_serializers import location_payload
 
 WEEKDAY_CODES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 ON_TIME_TOLERANCE_MINUTES = 10
@@ -347,3 +348,102 @@ class DashboardFeedView(APIView):
         query.is_valid(raise_exception=True)
         day = query.validated_data.get("date") or local_today()
         return Response(dashboard_feed(request.user.person.company, day))
+
+
+# ---------------------------------------------------------------------------
+# Mapa ao vivo: GET dashboard/map/?date=AAAA-MM-DD — rotas do dia com o ônibus, o status, as
+# paradas e o destino (endereço da empresa). A posição só vem se o motorista a enviou naquele
+# dia; depois o painel segue pelas mensagens vehicle_location do WebSocket.
+# ---------------------------------------------------------------------------
+STALE_LOCATION_SECONDS = 120
+
+
+def _point(latitude, longitude):
+    return {"latitude": float(latitude), "longitude": float(longitude)}
+
+
+def dashboard_map(company, day: date) -> dict:
+    start, end = _local_day_bounds(day)
+    routes = routes_of_day(company, day)
+    route_ids = [route.id for route in routes]
+
+    states = {}
+    for route_id, event_type in RouteEvent.objects.filter(
+        route_id__in=route_ids, is_active=True, timestamp__gte=start, timestamp__lt=end,
+        event_type__in=("departure", "arrival"),
+    ).values_list("route_id", "event_type"):
+        if event_type == "arrival" or states.get(route_id) != "finished":
+            states[route_id] = "finished" if event_type == "arrival" else "in_progress"
+    delayed = {
+        item["route_id"]
+        for group in dashboard_alerts(company, day)["groups"] if group["kind"] == "delays"
+        for item in group["items"]
+    }
+    locations = {
+        location.route_id: location
+        for location in VehicleLocation.objects.filter(
+            route_id__in=route_ids, recorded_at__gte=start, recorded_at__lt=end
+        )
+    }
+    stops = {}
+    for stop in (
+        RouteStop.objects.filter(route_id__in=route_ids, is_active=True, meeting_point__is_active=True)
+        .select_related("meeting_point__address")
+        .order_by("route_id", "sequence")
+    ):
+        address = stop.meeting_point.address
+        stops.setdefault(stop.route_id, []).append(
+            {"sequence": stop.sequence, "name": stop.meeting_point.name, **_point(address.latitude, address.longitude)}
+        )
+    passengers = {}
+    for route_id in RoutePassenger.objects.filter(
+        route_id__in=route_ids, is_active=True, person__is_active=True
+    ).values_list("route_id", flat=True):
+        passengers[route_id] = passengers.get(route_id, 0) + 1
+
+    destination = (
+        # Endereço da própria empresa: sem pessoa e fora dos pontos de encontro (que também são da empresa).
+        Address.objects.filter(company=company, person__isnull=True, is_active=True, meeting_points__isnull=True)
+        .order_by("id")
+        .first()
+    )
+    items = []
+    for route in sorted(routes, key=lambda r: (r.schedule.time if r.schedule_id else datetime.max.time(), r.name)):
+        vehicle = route.vehicle if route.vehicle_id and route.vehicle.is_active else None
+        driver = vehicle.driver if vehicle and vehicle.driver_id and vehicle.driver.is_active else None
+        location = locations.get(route.id)
+        items.append({
+            "id": route.id,
+            "name": route.name,
+            "time": route.schedule.time.strftime("%H:%M") if route.schedule_id else None,
+            "state": states.get(route.id, "not_started"),
+            "delayed": route.id in delayed,
+            "vehicle": (
+                {"plate": vehicle.plate_number, "model": vehicle.model, "capacity": vehicle.capacity} if vehicle else None
+            ),
+            "driver_name": driver.name if driver else None,
+            "passengers": passengers.get(route.id, 0),
+            "location": location_payload(location) if location else None,
+            "stops": stops.get(route.id, []),
+        })
+    return {
+        "date": day.isoformat(),
+        "generated_at": timezone.now().isoformat(),
+        "stale_after_seconds": STALE_LOCATION_SECONDS,
+        "destination": (
+            {"name": company.name, **_point(destination.latitude, destination.longitude)} if destination else None
+        ),
+        "routes": items,
+    }
+
+
+class DashboardMapView(APIView):
+    """GET dashboard/map/?date=AAAA-MM-DD — rotas do dia com posição, status e paradas."""
+
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def get(self, request):
+        query = DashboardSummaryQuery(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        day = query.validated_data.get("date") or local_today()
+        return Response(dashboard_map(request.user.person.company, day))

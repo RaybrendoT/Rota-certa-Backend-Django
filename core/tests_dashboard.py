@@ -228,3 +228,63 @@ class DashboardFeedTests(DashboardTestCase):
         r = self.client_for(self.manager_person).get(FEED_URL, {"date": THURSDAY.isoformat()})
         self.assertEqual(len(r.json()["items"]), 40)
         self.assertEqual(self.client_for(self.driver_person).get(FEED_URL).status_code, 403)
+
+
+MAP_URL = "/api/dashboard/map/"
+
+
+class DashboardMapTests(DashboardTestCase):
+    def get(self, day=THURSDAY):
+        r = self.client_for(self.manager_person).get(MAP_URL, {"date": day.isoformat()})
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def test_rota_com_paradas_destino_e_posicao_do_dia(self):
+        from core.models import MeetingPoint, RouteStop, VehicleLocation
+        from core.tests_realtime import make_stop
+
+        make_stop(self.route, "Ponto 2", 1, Decimal("-3.10"), Decimal("-60.01"))
+        make_stop(self.route, "Ponto 1", 0, Decimal("-3.11"), Decimal("-60.02"))
+        Address.objects.create(
+            company=self.company, street="Av. Fábrica", number="1", city="Manaus", state="AM",
+            zip_code="69000-000", latitude=Decimal("-3.12"), longitude=Decimal("-59.95"),
+        )
+        location = VehicleLocation.objects.create(
+            route=self.route, latitude=Decimal("-3.105"), longitude=Decimal("-60.015"), heading=45.0,
+            recorded_at=at(THURSDAY, 5, 30),
+        )
+        self.event(self.route, "departure", at(THURSDAY, 5, 0))
+
+        data = self.get()
+        self.assertEqual(data["destination"], {"name": "Acme", "latitude": -3.12, "longitude": -59.95})
+        [route] = data["routes"]
+        self.assertEqual((route["name"], route["time"], route["state"]), ("Rota A", "06:00", "in_progress"))
+        self.assertEqual(route["vehicle"]["plate"], "AAA-0001")
+        self.assertEqual(route["driver_name"], "Motorista Um")
+        self.assertEqual(route["passengers"], 1)
+        self.assertEqual([s["name"] for s in route["stops"]], ["Ponto 1", "Ponto 2"])
+        self.assertEqual(route["location"]["heading"], 45.0)
+        self.assertEqual(route["location"]["latitude"], -3.105)
+        self.assertTrue(MeetingPoint.objects.exists() and RouteStop.objects.count() == 2)
+        self.assertEqual(location.route_id, route["id"])
+
+    def test_posicao_de_outro_dia_nao_aparece_e_rota_atrasada_marcada(self):
+        from core.models import VehicleLocation
+
+        VehicleLocation.objects.create(
+            route=self.route, latitude=Decimal("-3.1"), longitude=Decimal("-60.0"),
+            recorded_at=at(THURSDAY - timedelta(days=1), 5, 30),
+        )
+        self.event(self.route, "delay", at(THURSDAY, 5, 40))
+        [route] = self.get()["routes"]
+        self.assertIsNone(route["location"])
+        self.assertTrue(route["delayed"])
+        self.assertEqual(route["state"], "not_started")
+
+    def test_rota_finalizada_e_permissao(self):
+        self.event(self.route, "departure", at(THURSDAY, 5, 0))
+        self.event(self.route, "arrival", at(THURSDAY, 6, 0))
+        data = self.get()
+        self.assertEqual(data["routes"][0]["state"], "finished")
+        self.assertIsNone(data["destination"])
+        self.assertEqual(self.client_for(self.driver_person).get(MAP_URL).status_code, 403)
