@@ -96,6 +96,7 @@ jobs:
         run: |
           python manage.py migrate --verbosity 0
           python manage.py seed_manaus_demo
+          python manage.py seed_company_staff --per-company 30
 
   build:
     name: Build e push da imagem
