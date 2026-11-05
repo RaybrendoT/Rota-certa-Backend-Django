@@ -28,6 +28,11 @@ FAST_HASHERS = override_settings(
     PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"]
 )
 
+# Os testes partem da regra de senha inicial (matrícula + 4 últimos dígitos do telefone).
+# Um ACCESS_ACCOUNT_AUTO_INITIAL_PASSWORD no .env de quem roda trocaria todas as senhas
+# por uma fixa e quebraria os logins; no CI não há .env, por isso só falhava localmente.
+INITIAL_PASSWORD_RULE = override_settings(ACCESS_ACCOUNT_AUTO_INITIAL_PASSWORD="")
+
 
 class EmailDomainDerivationTests(TestCase):
     """Domínio automático (sem Company.email_domain explícito) a partir do nome."""
@@ -63,6 +68,7 @@ class EmailDomainDerivationTests(TestCase):
 
 
 @FAST_HASHERS
+@INITIAL_PASSWORD_RULE
 class RoleTestCase(TestCase):
     """Base: duas empresas, gestor, dois motoristas (cada um com rota/veículo) e um funcionário."""
 
