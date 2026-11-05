@@ -408,7 +408,7 @@ def distribute(total, weights):
 def merge_small_stops(demand):
     """Bairro com pouca gente no turno usa um ponto só: o mais movimentado recebe os do ponto vazio."""
     by_bairro = {}
-    for stop_id, (stop, riders) in demand.items():
+    for stop_id, (stop, _riders) in demand.items():
         by_bairro.setdefault(stop.bairro, []).append(stop_id)
     for stop_ids in by_bairro.values():
         if len(stop_ids) < 2:

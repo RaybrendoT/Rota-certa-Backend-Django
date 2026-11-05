@@ -1,15 +1,6 @@
 import django_filters
-from .models import (
-    Company,
-    Person,
-    Route,
-    RouteStop,
-    Schedule,
-    MeetingPoint,
-    RouteEvent,
-    RoutePassenger,
-    Vehicle
-)
+
+from .models import Company, MeetingPoint, Person, Route, RouteEvent, RoutePassenger, RouteStop, Schedule, Vehicle
 
 
 class CompanyFilter(django_filters.FilterSet):

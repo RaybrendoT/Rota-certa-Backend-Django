@@ -1,0 +1,81 @@
+# Stack de produção numa EC2 só (ver deploy/README.md). Na pasta deploy/:
+#   bash deploy.sh                 # o que o CI/CD roda: backend do GHCR + o resto
+#   docker compose up -d --build   # constrói o backend a partir do código local
+# O frontend é construído a partir do repositório do Angular clonado ao lado deste
+# (../../rota-certa-frontend-angular), ou de FRONTEND_DIR.
+name: rotacerta
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-route_monitoring}
+      POSTGRES_USER: ${POSTGRES_USER:-rotacerta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no deploy/.env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+
+  # Channel layer do WebSocket (Channels). Só a rede interna do compose chega nele.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    # O CI/CD publica a imagem no GHCR e o deploy.sh baixa a tag do commit (BACKEND_TAG).
+    image: ${BACKEND_IMAGE:-ghcr.io/raybrendot/rota-certa-backend-django}:${BACKEND_TAG:-latest}
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Montados aqui para não depender de repetir a senha no .env.
+      DATABASE_URL: postgres://${POSTGRES_USER:-rotacerta}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-route_monitoring}
+      REDIS_URL: redis://redis:6379/0
+      # Atrás do Caddy (HTTPS): cookies seguros e X-Forwarded-Proto/For confiáveis.
+      USE_HTTPS: "True"
+      NUM_PROXIES: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Angular (nginx), do repositório do frontend. API_BASE_URL=/api: mesma origem.
+  frontend:
+    build: ${FRONTEND_DIR:-../../rota-certa-frontend-angular}
+    image: rotacerta-frontend:local
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: /api
+
+  # HTTPS automático (Let's Encrypt) e roteamento entre backend e frontend.
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      DOMAIN: ${DOMAIN:?defina DOMAIN no deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,17 @@
+# Um domínio só: Angular em /, API do Django em /api, WebSocket em /ws, admin e estáticos.
+# O Caddy emite e renova o certificado HTTPS (Let's Encrypt) sozinho.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Django (daphne): HTTP e WebSocket. O Caddy repassa o "Upgrade" do WebSocket sozinho.
+	# /static/ é servido pelo próprio backend (SERVE_STATIC_FILES), com o admin e o Swagger.
+	@django path /api /api/* /admin /admin/* /ws/* /static/*
+	handle @django {
+		reverse_proxy backend:8000
+	}
+
+	# Angular (nginx do container frontend), com o fallback de SPA para o index.html.
+	handle {
+		reverse_proxy frontend:80
+	}
+}

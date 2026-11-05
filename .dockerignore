@@ -11,7 +11,13 @@ db.sqlite3
 *.log
 staticfiles
 docs
+deploy
+*.sqlite3
+.ruff_cache
+.github
+.vscode
+whatsapp_qrcode.png
 
-# Dumps de dados (contas com hash de senha): não vão para a imagem, que é pública no Docker Hub.
+# Dumps de dados (contas com hash de senha): não vão para a imagem, que é pública.
 core_data.json
 data.json

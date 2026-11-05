@@ -1043,6 +1043,23 @@ python manage.py test core
 
 ---
 
+## CI/CD e deploy
+
+O workflow [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) roda em todo pull request e a cada push na `main`:
+**lint** (`ruff check`) → **testes** (num Postgres 16) → **build** da imagem → **push** no GHCR → **deploy** na EC2.
+Em PR ele só constrói a imagem, sem publicar nem fazer deploy.
+
+Antes do push, rode o lint localmente:
+
+```bash
+pip install ruff==0.17.3
+ruff check .          # ruff check --fix . arruma a ordem dos imports e afins
+```
+
+O guia do servidor, dos secrets do GitHub e do rollback está em [`deploy/README.md`](deploy/README.md).
+
+---
+
 # 🔍 Testando com Postman
 
 Uma forma simples de testar a API é utilizando o Postman.
@@ -1186,8 +1203,8 @@ Algumas evoluções que podem ser incorporadas futuramente:
 * [ ] WebSockets;
 * [ ] Redis;
 * [ ] Celery para tarefas assíncronas;
-* [ ] Docker;
-* [ ] CI/CD com GitHub Actions;
+* [x] Docker;
+* [x] CI/CD com GitHub Actions;
 * [ ] Testes de integração;
 * [ ] Cobertura de testes;
 * [ ] Deploy em ambiente cloud.
