@@ -13,6 +13,10 @@ main() {
   export BACKEND_TAG="${1:-latest}"
   local frontend_dir="${FRONTEND_DIR:-../../rota-certa-frontend-angular}"
 
+  # O Caddy só relê o Caddyfile ao reiniciar: guarda a versão antes do pull para comparar.
+  local caddyfile_before
+  caddyfile_before="$(sha256sum Caddyfile)"
+
   echo "==> Código do deploy (compose, Caddyfile, scripts)"
   git -C .. pull --ff-only
 
@@ -29,6 +33,11 @@ main() {
   echo "==> Subindo"
   # Sem --build: o backend vem do GHCR. Ele aplica as migrações ao subir.
   docker compose up -d --no-build --remove-orphans
+
+  if [ "$(sha256sum Caddyfile)" != "${caddyfile_before}" ]; then
+    echo "==> Caddyfile mudou: reiniciando o Caddy"
+    docker compose restart caddy
+  fi
 
   # Guarda a versão no ar, para saber o que está rodando e para o rollback.
   echo "${BACKEND_TAG}" > .deployed-tag

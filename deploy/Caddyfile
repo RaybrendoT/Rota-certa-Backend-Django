@@ -15,3 +15,9 @@
 		reverse_proxy frontend:80
 	}
 }
+
+# www → domínio principal (o DNS do www também aponta para esta EC2). O Caddy emite o
+# certificado do www sozinho, então o redirecionamento funciona em https://www... também.
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
