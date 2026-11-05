@@ -14,6 +14,7 @@ from .auth_views import (
     PasswordResetVerifyView,
 )
 from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
+from .push_views import PushDeviceUnregisterView, PushDeviceView
 from .views import HealthView
 from .viewsets import (
     AddressViewSet,
@@ -56,6 +57,8 @@ urlpatterns = [
     path("auth/refresh/", AccessAccountTokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", AccessAccountTokenVerifyView.as_view(), name="auth-verify"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("me/devices/", PushDeviceView.as_view(), name="me-devices"),
+    path("me/devices/unregister/", PushDeviceUnregisterView.as_view(), name="me-devices-unregister"),
     path("me/address/", MyAddressView.as_view(), name="me-address"),
     path("me/address/preview/", MyAddressPreviewView.as_view(), name="me-address-preview"),
     path("me/address/cep/<str:cep>/", CepLookupView.as_view(), name="me-address-cep"),

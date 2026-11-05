@@ -10,6 +10,7 @@ from django.utils import timezone
 from .driver_serializers import route_status_for_event_type
 from .geo import distance_meters
 from .models import Notification, RoutePassenger
+from .push import push_on_commit
 from .realtime import broadcast_on_commit, person_group, route_group
 from .realtime_serializers import NotificationSerializer, location_payload
 
@@ -22,7 +23,7 @@ Kind = Notification.Kind
 
 
 def notify(recipients, *, kind, title, message="", route=None, data=None):
-    """Grava uma notificação por destinatário e a entrega pelo WebSocket após o commit."""
+    """Grava uma notificação por destinatário e a entrega pelo WebSocket e por push após o commit."""
     created = Notification.objects.bulk_create(
         [
             Notification(
@@ -41,6 +42,7 @@ def notify(recipients, *, kind, title, message="", route=None, data=None):
             person_group(notification.recipient_id),
             {"type": "notification", "notification": NotificationSerializer(notification).data},
         )
+    push_on_commit(created)
     return created
 
 

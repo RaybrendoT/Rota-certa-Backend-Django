@@ -709,3 +709,33 @@ class PlanningConversation(models.Model):
 
     def __str__(self):
         return f"Planejamento #{self.pk} ({self.get_status_display()})"
+
+
+class PushDevice(models.Model):
+    """
+    Aparelho que recebe notificações push (token do Firebase Cloud Messaging).
+    O app registra o token depois do login e quando o Firebase o renova, e o remove no logout.
+    Tokens que o FCM diz que não valem mais são desativados no primeiro envio que falhar.
+    """
+
+    class Platform(models.TextChoices):
+        ANDROID = "android", "Android"
+        IOS = "ios", "iOS"
+        WEB = "web", "Web"
+
+    person = models.ForeignKey(
+        Person, on_delete=models.CASCADE, related_name="push_devices", verbose_name="pessoa",
+    )
+    token = models.CharField("token FCM", max_length=512, unique=True)
+    platform = models.CharField("plataforma", max_length=20, choices=Platform.choices, default=Platform.ANDROID)
+    is_active = models.BooleanField("ativo", default=True, db_index=True)
+    created_at = models.DateTimeField("criado em", default=timezone.now, editable=False)
+    last_seen_at = models.DateTimeField("último registro", default=timezone.now)
+    deactivated_reason = models.CharField("motivo da desativação", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "aparelho (push)"
+        verbose_name_plural = "aparelhos (push)"
+
+    def __str__(self):
+        return f"{self.person.name} — {self.get_platform_display()} ({'ativo' if self.is_active else 'inativo'})"

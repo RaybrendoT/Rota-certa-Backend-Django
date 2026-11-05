@@ -15,6 +15,7 @@ main() {
 
   echo "==> Código do deploy (compose, Caddyfile, scripts)"
   git -C .. pull --ff-only
+  mkdir -p secrets
 
   echo "==> Backend: ${BACKEND_IMAGE:-ghcr.io/raybrendot/rota-certa-backend-django}:${BACKEND_TAG}"
   docker compose pull backend

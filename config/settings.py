@@ -291,6 +291,17 @@ GOOGLE_ROUTES_API_URL = config(
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
 PLANNING_MODEL = config("PLANNING_MODEL", default="claude-opus-5-5")
 
+# Notificações push (Firebase Cloud Messaging, API HTTP v1). Ver core/push.py.
+# Use um dos dois: caminho do JSON da conta de serviço ou o próprio JSON (texto ou base64).
+# Sem nenhum, o push fica desligado.
+FCM_SERVICE_ACCOUNT_FILE = config("FCM_SERVICE_ACCOUNT_FILE", default="")
+FCM_SERVICE_ACCOUNT_JSON = config("FCM_SERVICE_ACCOUNT_JSON", default="")
+FCM_PROJECT_ID = config("FCM_PROJECT_ID", default="")  # vazio = project_id da conta de serviço
+FCM_ANDROID_CHANNEL_ID = config("FCM_ANDROID_CHANNEL_ID", default="avisos_da_van")
+FCM_HTTP_TIMEOUT = config("FCM_HTTP_TIMEOUT", default=15, cast=int)
+# Envia numa thread depois do commit; False envia na hora (testes).
+PUSH_ASYNC = config("PUSH_ASYNC", default=True, cast=bool)
+
 # ====================== ADMIN (Django admin + Jazzmin) ======================
 # Idioma e fuso só do /admin (core.middleware.AdminLocaleMiddleware); a API segue en-us/UTC.
 ADMIN_LANGUAGE_CODE = "pt-br"
