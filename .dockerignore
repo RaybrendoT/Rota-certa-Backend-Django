@@ -11,3 +11,7 @@ db.sqlite3
 *.log
 staticfiles
 docs
+
+# Dumps de dados (contas com hash de senha): não vão para a imagem, que é pública no Docker Hub.
+core_data.json
+data.json
