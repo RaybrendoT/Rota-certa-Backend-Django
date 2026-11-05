@@ -263,9 +263,7 @@ Django
 
 Django REST Framework
 
-PostgreSQL (produção)
-
-SQLite (desenvolvimento)
+PostgreSQL (desenvolvimento e produção; o único banco suportado)
 
 Postman
 
