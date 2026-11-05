@@ -189,3 +189,42 @@ class DashboardAlertsTests(DashboardTestCase):
         self.assertEqual([g["kind"] for g in r.json()["groups"]], ["incidents", "delays", "unassigned", "address_reviews"])
         self.assertEqual(self.client_for(self.driver_person).get(ALERTS_URL).status_code, 403)
         self.assertEqual(self.client_for(self.manager_person).get(ALERTS_URL, {"date": "x"}).status_code, 400)
+
+
+FEED_URL = "/api/dashboard/feed/"
+
+
+class DashboardFeedTests(DashboardTestCase):
+    def test_eventos_e_embarques_do_dia_do_mais_novo_ao_mais_antigo(self):
+        self.event(self.route, "departure", at(THURSDAY, 5, 0))
+        self.event(self.route, "incident", at(THURSDAY, 5, 30))
+        self.event(self.route, "arrival", at(THURSDAY - timedelta(days=1), 6, 0))  # outro dia
+        self.event(self.other_route, "departure", at(THURSDAY, 5, 10))  # outra empresa
+        RoutePassenger.objects.filter(pk=self.passenger.pk).update(
+            boarding_status="confirmed", updated_at=at(THURSDAY, 5, 20)
+        )
+        RoutePassenger.objects.filter(pk=self.other_passenger.pk).update(
+            boarding_status="absent", updated_at=at(THURSDAY, 5, 25)
+        )
+
+        r = self.client_for(self.manager_person).get(FEED_URL, {"date": THURSDAY.isoformat()})
+        self.assertEqual(r.status_code, 200, r.content)
+        items = r.json()["items"]
+        self.assertEqual(
+            [(i["type"], i.get("event_type") or i.get("status")) for i in items],
+            [("route_event", "incident"), ("boarding_status", "confirmed"), ("route_event", "departure")],
+        )
+        self.assertEqual(items[1]["person_name"], "Fulano")
+        self.assertEqual(items[0]["route_name"], "Rota A")
+
+    def test_embarque_pendente_nao_entra(self):
+        RoutePassenger.objects.filter(pk=self.passenger.pk).update(updated_at=at(THURSDAY, 5, 20))
+        r = self.client_for(self.manager_person).get(FEED_URL, {"date": THURSDAY.isoformat()})
+        self.assertEqual(r.json()["items"], [])
+
+    def test_limite_e_permissao(self):
+        for minute in range(45):
+            self.event(self.route, "stop", at(THURSDAY, 5, minute))
+        r = self.client_for(self.manager_person).get(FEED_URL, {"date": THURSDAY.isoformat()})
+        self.assertEqual(len(r.json()["items"]), 40)
+        self.assertEqual(self.client_for(self.driver_person).get(FEED_URL).status_code, 403)

@@ -289,3 +289,61 @@ class DashboardAlertsView(APIView):
         query.is_valid(raise_exception=True)
         day = query.validated_data.get("date") or local_today()
         return Response(dashboard_alerts(request.user.person.company, day))
+
+
+# ---------------------------------------------------------------------------
+# Feed: GET dashboard/feed/?date=AAAA-MM-DD — o que aconteceu nas rotas da empresa no dia,
+# do mais novo para o mais antigo. Mesmo formato das mensagens route_event e boarding_status
+# do WebSocket (/ws/stream/), para o painel abrir preenchido e seguir ao vivo.
+# Embarques: como o status não guarda data, entram os passageiros alterados no dia.
+# ---------------------------------------------------------------------------
+FEED_LIMIT = 40
+
+
+def dashboard_feed(company, day: date, limit: int = FEED_LIMIT) -> dict:
+    start, end = _local_day_bounds(day)
+    events = (
+        RouteEvent.objects.filter(
+            route__company=company, route__is_active=True, is_active=True, timestamp__gte=start, timestamp__lt=end
+        )
+        .select_related("route")
+        .order_by("-timestamp", "-id")[:limit]
+    )
+    boardings = (
+        RoutePassenger.objects.filter(
+            route__company=company, route__is_active=True, is_active=True,
+            boarding_status__in=("confirmed", "absent"), updated_at__gte=start, updated_at__lt=end,
+        )
+        .select_related("route", "person")
+        .order_by("-updated_at", "-id")[:limit]
+    )
+    items = [
+        {
+            "type": "route_event", "id": event.id, "route_id": event.route_id, "route_name": event.route.name,
+            "event_type": event.event_type, "description": event.description,
+            "timestamp": event.timestamp.isoformat(),
+        }
+        for event in events
+    ] + [
+        {
+            "type": "boarding_status", "route_passenger_id": passenger.id, "route_id": passenger.route_id,
+            "route_name": passenger.route.name, "person_id": passenger.person_id,
+            "person_name": passenger.person.name, "status": passenger.boarding_status,
+            "timestamp": passenger.updated_at.isoformat(),
+        }
+        for passenger in boardings
+    ]
+    items.sort(key=lambda item: item["timestamp"], reverse=True)
+    return {"date": day.isoformat(), "items": items[:limit]}
+
+
+class DashboardFeedView(APIView):
+    """GET dashboard/feed/?date=AAAA-MM-DD — últimos eventos e embarques do dia."""
+
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def get(self, request):
+        query = DashboardSummaryQuery(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        day = query.validated_data.get("date") or local_today()
+        return Response(dashboard_feed(request.user.person.company, day))
