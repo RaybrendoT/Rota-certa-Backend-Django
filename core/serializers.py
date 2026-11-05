@@ -238,6 +238,7 @@ class RoutePassengerSerializer(BaseSerializer):
 
 
 class RouteEventSerializer(BaseSerializer):
+    route_name = serializers.CharField(source="route.name", read_only=True)
     latitude = serializers.DecimalField(
         max_digits=9,
         decimal_places=6,

@@ -13,7 +13,14 @@ from .auth_views import (
     PasswordResetRequestView,
     PasswordResetVerifyView,
 )
-from .dashboard import DashboardAlertsView, DashboardFeedView, DashboardMapView, DashboardSummaryView
+from .dashboard import (
+    DashboardAlertsView,
+    DashboardExportView,
+    DashboardFeedView,
+    DashboardMapView,
+    DashboardSummaryView,
+    DashboardTrendsView,
+)
 from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
 from .push_views import PushDeviceUnregisterView, PushDeviceView
 from .views import HealthView
@@ -89,5 +96,7 @@ urlpatterns = [
     path("dashboard/alerts/", DashboardAlertsView.as_view(), name="dashboard-alerts"),
     path("dashboard/feed/", DashboardFeedView.as_view(), name="dashboard-feed"),
     path("dashboard/map/", DashboardMapView.as_view(), name="dashboard-map"),
+    path("dashboard/trends/", DashboardTrendsView.as_view(), name="dashboard-trends"),
+    path("dashboard/export/", DashboardExportView.as_view(), name="dashboard-export"),
     path("", include(router.urls)),
 ]

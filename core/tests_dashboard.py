@@ -288,3 +288,80 @@ class DashboardMapTests(DashboardTestCase):
         self.assertEqual(data["routes"][0]["state"], "finished")
         self.assertIsNone(data["destination"])
         self.assertEqual(self.client_for(self.driver_person).get(MAP_URL).status_code, 403)
+
+
+TRENDS_URL = "/api/dashboard/trends/"
+
+
+class DashboardTrendsTests(DashboardTestCase):
+    def test_dias_e_ranking_de_ausencias(self):
+        from core.dashboard import dashboard_trends
+
+        wednesday = THURSDAY - timedelta(days=1)
+        self.board(self.passenger, "absent", at(THURSDAY, 5, 0))
+        self.event(self.route, "departure", at(THURSDAY, 5, 0))
+        self.event(self.route, "arrival", at(THURSDAY, 6, 0))
+
+        data = dashboard_trends(self.company, 7, today=THURSDAY)
+        self.assertEqual((data["from"], data["to"]), ((THURSDAY - timedelta(days=6)).isoformat(), THURSDAY.isoformat()))
+        self.assertEqual(len(data["daily"]), 7)
+        thursday = data["daily"][-1]
+        self.assertEqual((thursday["expected"], thursday["absent"], thursday["confirmed"]), (1, 1, 0))
+        self.assertEqual((thursday["on_time"], thursday["punctuality_rate"]), (1, 1.0))
+        self.assertEqual(next(d for d in data["daily"] if d["date"] == wednesday.isoformat())["routes"], 0)
+        # turno de seg e qui: a rota roda 2 vezes na semana -> 2 passageiros-dia, 1 ausência
+        self.assertEqual(data["routes"], [{"route_id": self.route.id, "name": "Rota A", "expected": 2, "absent": 1, "rate": 0.5}])
+
+    def test_endpoint_valida_dias_e_permissao(self):
+        client = self.client_for(self.manager_person)
+        r = client.get(TRENDS_URL, {"days": "14"})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(r.json()["daily"]), 14)
+        self.assertEqual(client.get(TRENDS_URL, {"days": "90"}).status_code, 400)
+        self.assertEqual(self.client_for(self.driver_person).get(TRENDS_URL).status_code, 403)
+
+
+class DashboardShiftFilterAndExportTests(DashboardTestCase):
+    def setUp(self):
+        super().setUp()
+        self.afternoon = Schedule.objects.create(company=self.company, time=time(14, 0), weekdays=["THU"])
+        self.late_route = Route.objects.create(
+            company=self.company, name="Rota Tarde", schedule=self.afternoon, vehicle=self.route.vehicle
+        )
+
+    def test_filtro_de_turno_no_resumo_alertas_e_feed(self):
+        self.event(self.late_route, "incident", at(THURSDAY, 13, 30))
+        client = self.client_for(self.manager_person)
+        params = {"date": THURSDAY.isoformat()}
+
+        all_routes = client.get("/api/dashboard/summary/", params).json()
+        self.assertEqual(all_routes["routes"]["total"], 2)
+        self.assertEqual([s["time"] for s in all_routes["available_shifts"]], ["06:00", "14:00"])
+
+        morning = client.get("/api/dashboard/summary/", {**params, "schedule": self.morning.id}).json()
+        self.assertEqual(morning["routes"]["total"], 1)
+        self.assertEqual(len(morning["available_shifts"]), 2)  # o filtro não some com os outros turnos
+
+        alerts = client.get("/api/dashboard/alerts/", {**params, "schedule": self.morning.id}).json()
+        self.assertEqual(next(g for g in alerts["groups"] if g["kind"] == "incidents")["count"], 0)
+        feed = client.get("/api/dashboard/feed/", {**params, "schedule": self.afternoon.id}).json()
+        self.assertEqual([i["route_name"] for i in feed["items"]], ["Rota Tarde"])
+
+    def test_exporta_csv_para_excel(self):
+        self.event(self.route, "departure", at(THURSDAY, 5, 0))
+        self.event(self.route, "arrival", at(THURSDAY, 6, 5))
+        self.board(self.passenger, "confirmed", at(THURSDAY, 5, 10))
+
+        r = self.client_for(self.manager_person).get("/api/dashboard/export/", {"date": THURSDAY.isoformat()})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("rotacerta-resumo-2026-11-05.csv", r["Content-Disposition"])
+        text = r.content.decode("utf-8")
+        self.assertTrue(text.startswith("﻿"))
+        lines = [line.split(";") for line in text.lstrip("﻿").strip().splitlines()]
+        self.assertEqual(lines[0][:4], ["Data", "Turno", "Rota", "Status"])
+        self.assertEqual(
+            lines[1][:7] + lines[1][10:13],
+            ["05/11/2026", "06:00", "Rota A", "Finalizada", "05:00", "06:05", "Sim", "1", "1", "0"],
+        )
+        self.assertEqual(lines[2][2:4], ["Rota Tarde", "Não iniciada"])
+        self.assertEqual(self.client_for(self.driver_person).get("/api/dashboard/export/").status_code, 403)
