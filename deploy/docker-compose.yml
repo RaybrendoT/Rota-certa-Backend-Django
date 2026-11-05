@@ -43,6 +43,10 @@ services:
       # Atrás do Caddy (HTTPS): cookies seguros e X-Forwarded-Proto/For confiáveis.
       USE_HTTPS: "True"
       NUM_PROXIES: "1"
+    volumes:
+      # Conta de serviço do Firebase (push): deploy/secrets/firebase.json no servidor,
+      # com FCM_SERVICE_ACCOUNT_FILE=/app/secrets/firebase.json no .env.
+      - ./secrets:/app/secrets:ro
     depends_on:
       db:
         condition: service_healthy

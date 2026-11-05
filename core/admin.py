@@ -13,6 +13,7 @@ from .models import (
     Notification,
     Person,
     PlanningConversation,
+    PushDevice,
     Route,
     RouteEvent,
     RoutePassenger,
@@ -470,6 +471,15 @@ class NotificationAdmin(GeneratedByAppAdmin):
     list_select_related = ("recipient", "route")
     search_fields = ("recipient__name", "title", "message")
     date_hierarchy = "created_at"
+
+
+@admin.register(PushDevice)
+class PushDeviceAdmin(admin.ModelAdmin):
+    list_display = ("person", "platform", "is_active", "last_seen_at", "created_at")
+    list_filter = ("platform", "is_active")
+    search_fields = ("person__name", "token")
+    raw_id_fields = ("person",)
+    readonly_fields = ("created_at",)
 
 
 @admin.register(PlanningConversation)

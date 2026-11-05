@@ -48,3 +48,6 @@ db.sqlite3-journal
 Thumbs.db
 .ruff_cache/
 deploy/.deployed-tag
+# Conta de serviço do Firebase (push): nunca versione.
+deploy/secrets/
+firebase*.json
