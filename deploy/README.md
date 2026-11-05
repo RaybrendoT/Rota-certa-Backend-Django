@@ -77,6 +77,18 @@ FRONTEND=1 bash deploy/deploy.sh       # também atualiza e reconstrói o Angula
 O `deploy.sh` faz `git pull` (compose, Caddyfile), baixa a imagem do backend, sobe tudo e limpa
 imagens velhas. O Angular não tem imagem publicada: ele é construído na própria EC2.
 
+### APK do app para baixar
+
+A pasta `deploy/downloads/` é servida em `https://SEU_DOMINIO/download/`. Os arquivos dela não
+vão para o git nem para os containers, então continuam lá depois dos deploys. Para publicar ou
+trocar a APK (o QR de instalação aponta para `/download/rotacerta.apk`), na sua máquina:
+
+```bash
+scp -i RotaCerta.pem app-prod-debug.apk ubuntu@SEU_IP:~/rotacerta/rota-certa-backend-django/deploy/downloads/rotacerta.apk
+```
+
+O link é público: qualquer pessoa com ele baixa a APK (entrar no app continua exigindo login).
+
 ## 5. Backup do banco
 
 ```bash

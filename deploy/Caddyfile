@@ -3,6 +3,17 @@
 {$DOMAIN} {
 	encode zstd gzip
 
+	# Arquivos para baixar (APK do app): deploy/downloads/ na EC2, fora do git e dos containers,
+	# então sobrevivem a deploys. https://DOMINIO/download/rotacerta.apk → deploy/downloads/rotacerta.apk
+	handle_path /download/* {
+		root * /srv/downloads
+		@apk path *.apk
+		header @apk Content-Type application/vnd.android.package-archive
+		# Sempre revalida: ao trocar a APK, o celular baixa a nova.
+		header Cache-Control no-cache
+		file_server
+	}
+
 	# Django (daphne): HTTP e WebSocket. O Caddy repassa o "Upgrade" do WebSocket sozinho.
 	# /static/ é servido pelo próprio backend (SERVE_STATIC_FILES), com o admin e o Swagger.
 	@django path /api /api/* /admin /admin/* /ws/* /static/*
