@@ -1,0 +1,258 @@
+{% load i18n static %}<!DOCTYPE html>
+{% comment %}
+  Login do admin no mesmo visual da tela de login do painel Angular (features/auth/login):
+  cartão central, campos com rótulo flutuante, botão de largura total e modo claro/escuro.
+  Substitui o login do Jazzmin; o resto do admin continua com o Jazzmin. A preferência de tema
+  usa a mesma chave do painel (rotacerta.theme), então em produção (mesmo domínio) vale para os dois.
+{% endcomment %}
+<html lang="pt-br" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar | Rota Certa · Admin</title>
+  <link rel="icon" href="{% static 'core/img/logo.svg' %}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <script>
+    (function () {
+      var theme;
+      try { theme = localStorage.getItem('rotacerta.theme'); } catch (e) {}
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <style>
+    :root {
+      --rc-bg: #f1f5f9;
+      --rc-surface: #ffffff;
+      --rc-border: #e5e7eb;
+      --rc-field-border: #c4c9d4;
+      --rc-text: #111827;
+      --rc-text-muted: #6b7280;
+      --rc-danger-bg: #fef2f2;
+      --rc-danger-text: #b91c1c;
+      --rc-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.08);
+      --auth-accent: #1e40af;
+      --auth-accent-hover: #1d4ed8;
+      --auth-accent-text: #ffffff;
+      --auth-glow: rgba(37, 99, 235, 0.18);
+      color-scheme: light;
+    }
+    html[data-theme='dark'] {
+      --rc-bg: #0b1220;
+      --rc-surface: #111a2e;
+      --rc-border: #24314d;
+      --rc-field-border: #3a4a6b;
+      --rc-text: #e5e7eb;
+      --rc-text-muted: #94a3b8;
+      --rc-danger-bg: rgba(239, 68, 68, 0.16);
+      --rc-danger-text: #fca5a5;
+      --rc-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+      --auth-accent: #3b82f6;
+      --auth-accent-hover: #60a5fa;
+      --auth-accent-text: #0b1220;
+      --auth-glow: rgba(59, 130, 246, 0.22);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Roboto, "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--rc-text);
+      background:
+        radial-gradient(circle at 15% 10%, var(--auth-glow), transparent 45%),
+        radial-gradient(circle at 85% 90%, var(--auth-glow), transparent 40%),
+        var(--rc-bg);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .auth-theme {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--rc-text-muted);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+    .auth-theme:hover { background: var(--auth-glow); }
+    .auth-theme svg { width: 22px; height: 22px; fill: currentColor; }
+    html[data-theme='dark'] .icon-dark, html[data-theme='light'] .icon-light { display: none; }
+
+    .auth-card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--rc-surface);
+      border: 1px solid var(--rc-border);
+      border-radius: 16px;
+      box-shadow: var(--rc-shadow);
+      padding: 36px 32px 28px;
+    }
+    .auth-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 28px;
+    }
+    .auth-brand img { width: 36px; height: 36px; border-radius: 9px; }
+    h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 4px; }
+    .auth-subtitle { color: var(--rc-text-muted); margin: 0 0 24px; font-size: 0.875rem; }
+
+    .auth-error {
+      background: var(--rc-danger-bg);
+      color: var(--rc-danger-text);
+      border-radius: 8px;
+      font-size: 0.875rem;
+      margin: 0 0 16px;
+      padding: 10px 12px;
+    }
+    .auth-error p { margin: 0; }
+    .auth-error p + p { margin-top: 4px; }
+
+    /* Campo com contorno e rótulo flutuante, no estilo do mat-form-field "outline" do painel. */
+    .field { position: relative; margin-bottom: 20px; }
+    .field input {
+      width: 100%;
+      height: 56px;
+      padding: 18px 14px 6px;
+      border: 1px solid var(--rc-field-border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--rc-text);
+      font: inherit;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .field input:hover { border-color: var(--rc-text-muted); }
+    .field input:focus { border-color: var(--auth-accent); box-shadow: 0 0 0 1px var(--auth-accent); }
+    .field label {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--rc-text-muted);
+      font-size: 1rem;
+      pointer-events: none;
+      transition: top 0.15s ease, font-size 0.15s ease, color 0.15s ease;
+    }
+    .field input:focus + label,
+    .field input:not(:placeholder-shown) + label {
+      top: 14px;
+      font-size: 0.75rem;
+    }
+    .field input:focus + label { color: var(--auth-accent); }
+    .field input:-webkit-autofill,
+    .field input:-webkit-autofill:focus {
+      -webkit-text-fill-color: var(--rc-text);
+      -webkit-box-shadow: 0 0 0 1000px var(--rc-surface) inset;
+      caret-color: var(--rc-text);
+    }
+
+    .auth-submit {
+      width: 100%;
+      height: 48px;
+      margin-top: 4px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--auth-accent);
+      color: var(--auth-accent-text);
+      font: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+    .auth-submit:hover { background: var(--auth-accent-hover); }
+    .auth-submit:focus-visible { outline: 3px solid var(--auth-glow); outline-offset: 2px; }
+
+    .auth-links {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+      font-size: 0.875rem;
+    }
+    .auth-links a { color: var(--auth-accent); text-decoration: none; }
+    .auth-links a:hover { text-decoration: underline; }
+
+    @media (max-width: 480px) {
+      .auth-card { padding: 28px 20px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <button type="button" class="auth-theme" id="theme-toggle" aria-label="Alternar modo claro/escuro" title="Alternar modo claro/escuro">
+    <svg class="icon-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+    <svg class="icon-light" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM2 13h2a1 1 0 0 0 0-2H2a1 1 0 0 0 0 2zm18 0h2a1 1 0 0 0 0-2h-2a1 1 0 0 0 0 2zM11 2v2a1 1 0 0 0 2 0V2a1 1 0 0 0-2 0zm0 18v2a1 1 0 0 0 2 0v-2a1 1 0 0 0-2 0zM5.99 4.58a1 1 0 0 0-1.41 1.41l1.06 1.06a1 1 0 0 0 1.41-1.41L5.99 4.58zm12.37 12.37a1 1 0 0 0-1.41 1.41l1.06 1.06a1 1 0 0 0 1.41-1.41l-1.06-1.06zm1.06-10.96a1 1 0 0 0-1.41-1.41l-1.06 1.06a1 1 0 0 0 1.41 1.41l1.06-1.06zM7.05 18.36a1 1 0 0 0-1.41-1.41l-1.06 1.06a1 1 0 0 0 1.41 1.41l1.06-1.06z"/></svg>
+  </button>
+
+  <main class="auth-card">
+    <div class="auth-brand">
+      <img src="{% static 'core/img/logo.svg' %}" alt="" aria-hidden="true">
+      <span>Rotacerta</span>
+    </div>
+
+    <h1>Entrar no admin</h1>
+    <p class="auth-subtitle">Administração do sistema, restrita à equipe técnica.</p>
+
+    {% if user.is_authenticated %}
+      <div class="auth-error" role="alert">
+        <p>Você entrou como {{ user.get_username }}, mas essa conta não tem acesso ao admin. Entre com outra conta.</p>
+      </div>
+    {% endif %}
+    {% if form.errors %}
+      <div class="auth-error" role="alert">
+        {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        {% for field in form %}{% for error in field.errors %}<p>{{ field.label }}: {{ error }}</p>{% endfor %}{% endfor %}
+      </div>
+    {% endif %}
+
+    <form action="{{ app_path }}" method="post" novalidate>
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="field">
+        <input type="text" name="username" id="id_username" placeholder=" " autocomplete="username" autocapitalize="none"
+               value="{{ form.username.value|default_if_none:'' }}" required {% if not form.username.value %}autofocus{% endif %}>
+        <label for="id_username">Usuário</label>
+      </div>
+      <div class="field">
+        <input type="password" name="password" id="id_password" placeholder=" " autocomplete="current-password" required
+               {% if form.username.value %}autofocus{% endif %}>
+        <label for="id_password">Senha</label>
+      </div>
+      <button type="submit" class="auth-submit">Entrar</button>
+    </form>
+
+    <div class="auth-links">
+      <a href="/">Ir para o painel de gestão</a>
+      {% url 'admin_password_reset' as password_reset_url %}
+      {% if password_reset_url %}<a href="{{ password_reset_url }}">Esqueci minha senha</a>{% endif %}
+    </div>
+  </main>
+
+  <script>
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('rotacerta.theme', next); } catch (e) {}
+    });
+  </script>
+</body>
+</html>
