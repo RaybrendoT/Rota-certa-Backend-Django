@@ -23,6 +23,7 @@ from .dashboard import (
 )
 from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
 from .push_views import PushDeviceUnregisterView, PushDeviceView
+from .reports import AttendanceDetailView, ReportOptionsView, ReportView
 from .views import HealthView
 from .viewsets import (
     AddressViewSet,
@@ -98,5 +99,11 @@ urlpatterns = [
     path("dashboard/map/", DashboardMapView.as_view(), name="dashboard-map"),
     path("dashboard/trends/", DashboardTrendsView.as_view(), name="dashboard-trends"),
     path("dashboard/export/", DashboardExportView.as_view(), name="dashboard-export"),
+    path("reports/options/", ReportOptionsView.as_view(), name="report-options"),
+    path("reports/attendance/", ReportView.as_view(kind="attendance"), name="report-attendance"),
+    path("reports/attendance/<int:person_id>/", AttendanceDetailView.as_view(), name="report-attendance-detail"),
+    path("reports/routes/", ReportView.as_view(kind="routes"), name="report-routes"),
+    path("reports/drivers/", ReportView.as_view(kind="drivers"), name="report-drivers"),
+    path("reports/events/", ReportView.as_view(kind="events"), name="report-events"),
     path("", include(router.urls)),
 ]
