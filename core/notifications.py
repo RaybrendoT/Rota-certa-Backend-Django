@@ -5,11 +5,18 @@ Toda notificação é gravada (aba Avisos tem histórico) e enviada ao grupo
 person_<id> do WebSocket. Mensagens de estado da rota (posição, eventos,
 embarques) vão para o grupo route_<id>.
 """
+from datetime import timedelta
+from decimal import Decimal
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from . import eta
+from .dates import local_today
 from .driver_serializers import route_status_for_event_type
 from .geo import distance_meters
-from .models import Notification, RoutePassenger
+from .models import EtaSample, Notification, RoutePassenger, StopArrival, VehicleLocation
 from .push import push_on_commit
 from .realtime import broadcast_on_commit, person_group, route_group
 from .realtime_serializers import NotificationSerializer, location_payload
@@ -149,26 +156,102 @@ def on_boarding_status_changed(passenger, *, by_passenger):
     )
 
 
+def record_vehicle_location(route, data, recorded_at=None):
+    """
+    Grava a última posição do ônibus na rota (API do motorista e simulador), calcula o
+    progresso no trajeto e dispara os avisos.
+    """
+    previous = VehicleLocation.objects.filter(route=route).values_list("progress_meters", flat=True).first()
+    location, _ = VehicleLocation.objects.update_or_create(
+        route=route,
+        defaults={
+            "latitude": round(Decimal(str(data["latitude"])), 6),
+            "longitude": round(Decimal(str(data["longitude"])), 6),
+            "heading": data.get("heading"),
+            "speed": data.get("speed"),
+            "accuracy": data.get("accuracy"),
+            "recorded_at": recorded_at or timezone.now(),
+        },
+    )
+    eta.update_progress(location, previous_along=previous)
+    on_vehicle_location(location)
+    return location
+
+
 def on_vehicle_location(location):
     route = location.route
     broadcast_on_commit(route_group(route.id), {"type": "vehicle_location", **location_payload(location)})
 
-    today = timezone.localdate()
+    today = local_today()
     already_notified = set(
         Notification.objects.filter(
-            route=route, kind=Kind.BUS_APPROACHING, created_at__date=today
+            route=route, kind=Kind.BUS_APPROACHING, created_at__date=timezone.localdate()
         ).values_list("recipient_id", flat=True)
     )
+    approaching_minutes = getattr(settings, "BUS_APPROACHING_MINUTES", 10)
+    path = eta.route_path(route)
     for p in _active_passengers(route):
         addr = _stop_address(p)
-        if addr is None or p.person_id in already_notified:
+        if addr is None:
             continue
-        distance = distance_meters(location.latitude, location.longitude, addr.latitude, addr.longitude)
-        if STOP_RADIUS_METERS < distance <= APPROACHING_RADIUS_METERS:
+        estimate = eta.estimate(p, location=location, path=path)
+        _record_eta(p, estimate, location, today)
+        if p.person_id in already_notified:
+            continue
+        if estimate["minutes"] is not None:
+            # Previsão pelo trajeto: avisa quando faltam poucos minutos (e o ônibus ainda não está no ponto).
+            should_notify = (
+                estimate["phase"] in (eta.Phase.APPROACHING, eta.Phase.ARRIVING)
+                and estimate["distance_meters"] > STOP_RADIUS_METERS
+                and estimate["minutes"] <= approaching_minutes
+            )
+            message = (
+                f"A rota {route.name} chega a {p.route_stop.meeting_point.name} "
+                f"em cerca de {estimate['minutes']} min."
+            )
+        else:
+            # Sem trajeto calculável: regra de distância em linha reta.
+            distance = distance_meters(location.latitude, location.longitude, addr.latitude, addr.longitude)
+            should_notify = STOP_RADIUS_METERS < distance <= APPROACHING_RADIUS_METERS
+            message = (
+                f"A rota {route.name} está a cerca de {round(distance, -1):.0f} m de "
+                f"{p.route_stop.meeting_point.name}."
+            )
+        if should_notify:
             notify(
                 [p.person],
                 kind=Kind.BUS_APPROACHING,
                 title="Ônibus chegando ao seu ponto",
-                message=f"A rota {route.name} está a cerca de {round(distance, -1):.0f} m de {p.route_stop.meeting_point.name}.",
+                message=message,
                 route=route,
+                data={"eta_minutes": estimate["minutes"]} if estimate["minutes"] is not None else None,
             )
+
+
+def _record_eta(passenger, estimate, location, service_date):
+    """Guarda a previsão (a cada ETA_SAMPLE_SECONDS) e a chegada real, para o relatório do teste em campo."""
+    if not estimate["is_live"] or (estimate["seconds"] is None and estimate["phase"] != eta.Phase.PASSED):
+        return
+    arrived = estimate["phase"] == eta.Phase.PASSED or (
+        estimate["distance_meters"] is not None and estimate["distance_meters"] <= eta.REACHED_TOLERANCE_M * 2
+    )
+    if arrived:
+        if not StopArrival.objects.filter(passenger=passenger, service_date=service_date).exists():
+            try:
+                with transaction.atomic():
+                    StopArrival.objects.create(passenger=passenger, service_date=service_date,
+                                               arrived_at=location.recorded_at)
+            except IntegrityError:
+                pass
+        return
+    interval = timedelta(seconds=getattr(settings, "ETA_SAMPLE_SECONDS", 30))
+    last = (
+        EtaSample.objects.filter(passenger=passenger, service_date=service_date)
+        .order_by("-recorded_at").values_list("recorded_at", flat=True).first()
+    )
+    if last is not None and location.recorded_at - last < interval:
+        return
+    EtaSample.objects.create(
+        passenger=passenger, service_date=service_date, recorded_at=location.recorded_at,
+        eta_seconds=estimate["seconds"], distance_meters=estimate["distance_meters"], speed=location.speed,
+    )

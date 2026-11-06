@@ -1,6 +1,7 @@
 """Serializers do app mobile em tempo real: notificações, localização e visão do colaborador."""
 from rest_framework import serializers
 
+from . import eta
 from .driver_serializers import _route_status_from_events, schedule_payload
 from .models import Notification, RoutePassenger, Schedule
 
@@ -90,6 +91,8 @@ class CollaboratorRouteSerializer(serializers.BaseSerializer):
             },
             "stop": stop_out,
             "last_location": location_payload(getattr(route, "current_location", None)),
+            # Previsão de chegada ao ponto e trajeto pelas ruas (core/eta.py).
+            **eta.passenger_payload(rp),
             "schedules": [
                 {"weekdays": s.weekdays, "time": s.time.strftime("%H:%M")} for s in schedules
             ],

@@ -933,6 +933,48 @@ POST /schedules/
 
 ---
 
+# 🕒 Previsão de chegada ao ponto (ETA)
+
+A cada posição enviada pelo app do motorista (`POST /api/routes/{id}/location/`), o backend:
+
+1. projeta o ônibus no **trajeto da rota** (paradas em ordem + empresa) e guarda o progresso em
+   `VehicleLocation.progress_meters`, para não "pular" de trecho quando o trajeto passa duas vezes pela mesma rua;
+2. calcula, para cada passageiro, a **previsão de chegada ao ponto dele**:
+   `ETA = distância restante pelo trajeto / max(25 km/h, velocidade do GPS) + 60 s por parada antes da dele`;
+3. envia o aviso **"Ônibus chegando ao seu ponto"** quando a previsão fica em até `BUS_APPROACHING_MINUTES`
+   (10, no `.env`), uma vez por dia. Sem trajeto calculável, vale a regra antiga do raio de 1 km;
+4. guarda a previsão a cada 30 s (`EtaSample`) e a hora em que o ônibus chegou ao ponto (`StopArrival`),
+   para o teste em campo.
+
+O trajeto vem da **Google Routes API** (`core/road_path.py`): é calculado uma vez por rota, guardado em
+`Route.road_path` e refeito só quando as paradas mudam. Sem `GOOGLE_MAPS_API_KEY`, usa a linha reta entre as paradas.
+
+Para o app do colaborador:
+
+| Endpoint | O que traz |
+|---|---|
+| `GET /api/me/routes/` | Cada rota passa a ter `eta` (fase, minutos, distância e paradas antes) e `path` (polyline do trajeto, `source` = `google` ou `straight`) |
+| `GET /api/me/routes/{id}/eta/` | Só a previsão e a última posição, para consultar a cada posição nova recebida pelo WebSocket |
+
+Fases (`eta.phase`): `waiting` (sem posição ao vivo), `approaching`, `arriving` (a 300 m), `passed`, `at_destination`.
+
+### Comandos
+
+```bash
+# Calcula/confere o trajeto pelas ruas de todas as rotas (mostra o final da chave em uso)
+python manage.py calcular_trajetos [--route-id 2] [--forcar]
+
+# Simula o ônibus andando pela rota, como o app do motorista (mapa, previsão e avisos sem ninguém na rua)
+python manage.py simular_rota --email <colaborador> --minutos 5
+python manage.py simular_rota --route-id 2 --speed-kmh 30   # ritmo real
+
+# Teste em campo: previsão registrada × chegada real ao ponto, em CSV, com o erro médio
+python manage.py relatorio_eta --data 2026-11-10 --rota 2 --saida eta.csv
+```
+
+O resumo do `relatorio_eta` mostra o erro médio geral e a ~10, ~5 e ~2 minutos da chegada
+(positivo = a previsão deu mais tempo do que o ônibus levou).
+
 # 🧪 Exemplos de utilização
 
 ## Criando um funcionário

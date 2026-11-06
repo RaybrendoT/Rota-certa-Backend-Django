@@ -313,6 +313,9 @@ class Route(BaseModel):
         help_text="Preenchida em rotas extras de um dia só (ex.: planejadas pelo assistente). "
         "Vazia = rota fixa, que se repete nos dias do turno.",
     )
+    # Trajeto pelas ruas (Google Routes API), calculado uma vez e refeito só quando as paradas
+    # mudam. Ver core/road_path.py.
+    road_path = models.JSONField("trajeto pelas ruas", null=True, blank=True)
 
     class Meta:
         verbose_name = "rota"
@@ -648,6 +651,10 @@ class VehicleLocation(models.Model):
     speed = models.FloatField("velocidade (m/s)", null=True, blank=True)
     accuracy = models.FloatField("precisão (m)", null=True, blank=True)
     recorded_at = models.DateTimeField("registrada em", default=timezone.now)
+    progress_meters = models.FloatField(
+        "progresso no trajeto (m)", null=True, blank=True,
+        help_text="Distância já percorrida no trajeto da rota (core/eta.py).",
+    )
 
     class Meta:
         verbose_name = "localização do veículo"
@@ -655,6 +662,42 @@ class VehicleLocation(models.Model):
 
     def __str__(self):
         return f"{self.route.name} @ {self.latitude},{self.longitude}"
+
+
+class EtaSample(models.Model):
+    """
+    Previsão de chegada registrada durante a rota, para comparar com a chegada real
+    (teste em campo: comando relatorio_eta).
+    """
+
+    passenger = models.ForeignKey(
+        "RoutePassenger", on_delete=models.CASCADE, related_name="eta_samples", verbose_name="passageiro"
+    )
+    service_date = models.DateField("dia da viagem", db_index=True)
+    recorded_at = models.DateTimeField("registrada em", default=timezone.now)
+    eta_seconds = models.PositiveIntegerField("previsão (s)")
+    distance_meters = models.PositiveIntegerField("distância restante (m)")
+    speed = models.FloatField("velocidade do GPS (m/s)", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "previsão de chegada"
+        verbose_name_plural = "previsões de chegada"
+        ordering = ["recorded_at"]
+
+
+class StopArrival(models.Model):
+    """Momento em que o ônibus chegou ao ponto do passageiro (uma vez por dia)."""
+
+    passenger = models.ForeignKey(
+        "RoutePassenger", on_delete=models.CASCADE, related_name="stop_arrivals", verbose_name="passageiro"
+    )
+    service_date = models.DateField("dia da viagem")
+    arrived_at = models.DateTimeField("chegou em")
+
+    class Meta:
+        verbose_name = "chegada ao ponto"
+        verbose_name_plural = "chegadas aos pontos"
+        constraints = [models.UniqueConstraint(fields=["passenger", "service_date"], name="unique_stop_arrival_per_day")]
 
 
 class Notification(models.Model):
