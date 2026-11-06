@@ -1,7 +1,6 @@
 import json
 import urllib.error
 import urllib.request
-from decimal import Decimal
 
 from django.conf import settings
 from django.db.models import F, Prefetch, Q
@@ -20,6 +19,7 @@ from rest_framework.throttling import UserRateThrottle
 from .boarding import record_boarding
 from .dates import local_today
 from .driver_serializers import DriverRouteBoardSerializer
+from .eta import estimate as eta_estimate
 from .filters import (
     CompanyFilter,
     DriverFilter,
@@ -46,9 +46,8 @@ from .models import (
     RouteStop,
     Schedule,
     Vehicle,
-    VehicleLocation,
 )
-from .notifications import on_boarding_status_changed, on_vehicle_location
+from .notifications import on_boarding_status_changed, record_vehicle_location
 from .permissions import (
     IsDriver,
     IsGerente,
@@ -314,18 +313,7 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
         serializer = LocationInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        location, _ = VehicleLocation.objects.update_or_create(
-            route=route,
-            defaults={
-                "latitude": round(Decimal(str(data["latitude"])), 6),
-                "longitude": round(Decimal(str(data["longitude"])), 6),
-                "heading": data.get("heading"),
-                "speed": data.get("speed"),
-                "accuracy": data.get("accuracy"),
-                "recorded_at": timezone.now(),
-            },
-        )
-        on_vehicle_location(location)
+        location = record_vehicle_location(route, data)
         return Response(location_payload(location), status=status.HTTP_202_ACCEPTED)
 
     @action(
@@ -657,6 +645,20 @@ class CollaboratorRouteViewSet(viewsets.GenericViewSet):
     def list(self, request):
         serializer = CollaboratorRouteSerializer()
         return Response([serializer.to_representation(rp) for rp in self.get_queryset()])
+
+    @action(detail=True, methods=["get"], url_path="eta")
+    def eta(self, request, pk=None):
+        """
+        GET me/routes/{route_passenger_id}/eta/ — previsão de chegada do ônibus ao ponto,
+        pelo trajeto das ruas. O app consulta a cada posição nova recebida pelo WebSocket.
+        """
+        passenger = get_object_or_404(self.get_queryset(), pk=pk)
+        location = getattr(passenger.route, "current_location", None)
+        return Response({
+            "route_passenger_id": passenger.id,
+            "eta": eta_estimate(passenger),
+            "last_location": location_payload(location),
+        })
 
     def partial_update(self, request, pk=None):
         passenger = get_object_or_404(self.get_queryset(), pk=pk)

@@ -286,6 +286,17 @@ GOOGLE_ROUTES_API_URL = config(
     "GOOGLE_ROUTES_API_URL",
     default="https://routes.googleapis.com/directions/v2:computeRoutes",
 )
+# Trajeto das rotas pelas ruas, calculado uma vez por rota (core/road_path.py).
+ROAD_PATH_ENABLED = config("ROAD_PATH_ENABLED", default=True, cast=bool)
+# Previsão de chegada ao ponto do colaborador (core/eta.py).
+ETA_AVERAGE_SPEED_KMH = 25  # velocidade mínima considerada (o GPS pode informar mais)
+ETA_STOP_DWELL_SECONDS = 60  # tempo parado em cada parada antes da do colaborador
+ETA_LOCATION_MAX_AGE_SECONDS = 120  # posição mais antiga que isso não é "ao vivo"
+ETA_ARRIVING_METERS = 300
+ETA_DESTINATION_METERS = 150
+ETA_SAMPLE_SECONDS = 30  # intervalo entre previsões guardadas para o relatório do teste em campo
+# Aviso "ônibus chegando" quando a previsão fica em até tantos minutos.
+BUS_APPROACHING_MINUTES = config("BUS_APPROACHING_MINUTES", default=10, cast=int)
 
 # Assistente de planejamento de rotas (Claude). Sem chave, o endpoint responde 503.
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")

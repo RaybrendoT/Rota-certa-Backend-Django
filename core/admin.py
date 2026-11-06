@@ -11,6 +11,7 @@ from .models import (
     Address,
     BoardingRecord,
     Company,
+    EtaSample,
     MeetingPoint,
     Notification,
     Person,
@@ -21,6 +22,7 @@ from .models import (
     RoutePassenger,
     RouteStop,
     Schedule,
+    StopArrival,
     Vehicle,
     VehicleLocation,
 )
@@ -479,6 +481,24 @@ class BoardingRecordAdmin(GeneratedByAppAdmin):
     search_fields = ("person__name", "person__employee_code", "route__name")
     date_hierarchy = "service_date"
     ordering = ("-service_date", "-updated_at")
+
+
+@admin.register(EtaSample)
+class EtaSampleAdmin(GeneratedByAppAdmin):
+    """Previsões guardadas durante as rotas (teste em campo: manage.py relatorio_eta)."""
+
+    list_display = ("service_date", "recorded_at", "passenger", "eta_seconds", "distance_meters", "speed")
+    list_filter = ("service_date", "passenger__route")
+    list_select_related = ("passenger__person", "passenger__route")
+    ordering = ("-recorded_at",)
+
+
+@admin.register(StopArrival)
+class StopArrivalAdmin(GeneratedByAppAdmin):
+    list_display = ("service_date", "arrived_at", "passenger")
+    list_filter = ("service_date", "passenger__route")
+    list_select_related = ("passenger__person", "passenger__route")
+    ordering = ("-arrived_at",)
 
 
 @admin.register(Notification)
