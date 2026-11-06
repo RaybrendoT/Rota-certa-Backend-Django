@@ -11,6 +11,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings
 
 from .models import AccessAccount, normalize_email
+from .profile_photo import photo_data_url
 from .tokens import AccessAccountRefreshToken
 
 
@@ -22,6 +23,10 @@ class PersonBriefSerializer(serializers.Serializer):
     role = serializers.CharField(source="access_account.role", read_only=True)
     company_id = serializers.IntegerField()
     company_name = serializers.CharField(source="company.name")
+    photo = serializers.SerializerMethodField(help_text="Foto do perfil como data URL, ou null.")
+
+    def get_photo(self, person):
+        return photo_data_url(person)
 
 
 class LoginSerializer(serializers.Serializer):

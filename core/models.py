@@ -112,6 +112,11 @@ class Person(BaseModel):
 
     license_number = models.CharField("CNH", max_length=100, null=True, blank=True)   # só driver
     employee_code = models.CharField("matrícula", max_length=100, null=True, blank=True)    # só employee
+    # Foto do perfil (painel/app): imagem pequena já recortada no cliente, guardada no banco para não
+    # depender de armazenamento de arquivos. Ver core/profile_photo.py.
+    photo = models.BinaryField("foto", null=True, blank=True, editable=False)
+    photo_content_type = models.CharField("tipo da foto", max_length=20, blank=True, default="", editable=False)
+    photo_updated_at = models.DateTimeField("foto atualizada em", null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = "pessoa"

@@ -22,6 +22,7 @@ from .dashboard import (
     DashboardTrendsView,
 )
 from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
+from .profile_photo import MyPhotoView
 from .push_views import PushDeviceUnregisterView, PushDeviceView
 from .reports import AttendanceDetailView, ReportOptionsView, ReportView
 from .views import HealthView
@@ -66,6 +67,7 @@ urlpatterns = [
     path("auth/refresh/", AccessAccountTokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", AccessAccountTokenVerifyView.as_view(), name="auth-verify"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("me/photo/", MyPhotoView.as_view(), name="me-photo"),
     path("me/devices/", PushDeviceView.as_view(), name="me-devices"),
     path("me/devices/unregister/", PushDeviceUnregisterView.as_view(), name="me-devices-unregister"),
     path("me/address/", MyAddressView.as_view(), name="me-address"),
