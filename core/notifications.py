@@ -73,7 +73,9 @@ def on_route_event_created(event):
         route_group(route.id),
         {
             "type": "route_event",
+            "id": event.id,
             "route_id": route.id,
+            "route_name": route.name,
             "event_type": event.event_type,
             "description": event.description,
             "route_status": route_status_for_event_type(event.event_type),
@@ -118,9 +120,12 @@ def on_boarding_status_changed(passenger, *, by_passenger):
         {
             "type": "boarding_status",
             "route_id": route.id,
+            "route_name": route.name,
             "route_passenger_id": passenger.id,
             "person_id": passenger.person_id,
+            "person_name": passenger.person.name,
             "status": passenger.boarding_status,
+            "timestamp": passenger.updated_at.isoformat(),
         },
     )
 

@@ -93,11 +93,12 @@ class PushTests(RealtimeTestCase):
         [message] = self.messages
         notification = Notification.objects.get(recipient=self.employee_person)
         self.assertEqual(message["token"], TOKEN)
-        self.assertEqual(message["notification"], {"title": "Seu ônibus saiu", "body": "A rota Rota A foi iniciada."})
+        self.assertNotIn("notification", message)  # só data: o app monta a notificação
         self.assertEqual(message["data"], {
             "notification_id": str(notification.pk), "kind": "route_departure", "route_id": str(self.route.pk),
+            "title": "Seu ônibus saiu", "message": "A rota Rota A foi iniciada.",
         })
-        self.assertEqual(message["android"]["notification"]["channel_id"], "avisos_da_van")
+        self.assertEqual(message["android"], {"priority": "HIGH"})
         claims = jwt.decode(self.oauth[0]["assertion"][0], _KEY.public_key(), algorithms=["RS256"],
                             audience=ACCOUNT["token_uri"])
         self.assertEqual(claims["scope"], push.FCM_SCOPE)

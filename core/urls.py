@@ -13,8 +13,18 @@ from .auth_views import (
     PasswordResetRequestView,
     PasswordResetVerifyView,
 )
+from .dashboard import (
+    DashboardAlertsView,
+    DashboardExportView,
+    DashboardFeedView,
+    DashboardMapView,
+    DashboardSummaryView,
+    DashboardTrendsView,
+)
 from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConversationViewSet
+from .profile_photo import MyPhotoView
 from .push_views import PushDeviceUnregisterView, PushDeviceView
+from .reports import AttendanceDetailView, ReportOptionsView, ReportView
 from .views import HealthView
 from .viewsets import (
     AddressViewSet,
@@ -57,6 +67,7 @@ urlpatterns = [
     path("auth/refresh/", AccessAccountTokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", AccessAccountTokenVerifyView.as_view(), name="auth-verify"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("me/photo/", MyPhotoView.as_view(), name="me-photo"),
     path("me/devices/", PushDeviceView.as_view(), name="me-devices"),
     path("me/devices/unregister/", PushDeviceUnregisterView.as_view(), name="me-devices-unregister"),
     path("me/address/", MyAddressView.as_view(), name="me-address"),
@@ -84,5 +95,17 @@ urlpatterns = [
     ),
     path("pickup-suggestions/", PickupSuggestionsView.as_view(), name="pickup-suggestions"),
     path("demand-map/", DemandMapView.as_view(), name="demand-map"),
+    path("dashboard/summary/", DashboardSummaryView.as_view(), name="dashboard-summary"),
+    path("dashboard/alerts/", DashboardAlertsView.as_view(), name="dashboard-alerts"),
+    path("dashboard/feed/", DashboardFeedView.as_view(), name="dashboard-feed"),
+    path("dashboard/map/", DashboardMapView.as_view(), name="dashboard-map"),
+    path("dashboard/trends/", DashboardTrendsView.as_view(), name="dashboard-trends"),
+    path("dashboard/export/", DashboardExportView.as_view(), name="dashboard-export"),
+    path("reports/options/", ReportOptionsView.as_view(), name="report-options"),
+    path("reports/attendance/", ReportView.as_view(kind="attendance"), name="report-attendance"),
+    path("reports/attendance/<int:person_id>/", AttendanceDetailView.as_view(), name="report-attendance-detail"),
+    path("reports/routes/", ReportView.as_view(kind="routes"), name="report-routes"),
+    path("reports/drivers/", ReportView.as_view(kind="drivers"), name="report-drivers"),
+    path("reports/events/", ReportView.as_view(kind="events"), name="report-events"),
     path("", include(router.urls)),
 ]

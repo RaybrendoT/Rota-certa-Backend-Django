@@ -146,17 +146,20 @@ def access_token():
 
 
 def send(token, title, body, data=None):
-    """Envia uma notificação para um aparelho e devolve o id da mensagem no FCM."""
+    """
+    Envia uma mensagem para um aparelho e devolve o id da mensagem no FCM.
+
+    Só "data", sem o bloco "notification": assim o app Android recebe em
+    onMessageReceived mesmo fechado e mostra a notificação com o mesmo id do aviso do
+    WebSocket (sem duplicar). Título e texto vão em data["title"] e data["message"].
+    """
+    payload = {**(data or {}), "title": title, "message": body}
     message = {
         "token": token,
-        "notification": {"title": title, "body": body},
         # Valores de "data" precisam ser texto.
-        "data": {str(k): "" if v is None else str(v) for k, v in (data or {}).items()},
-        "android": {
-            "priority": "HIGH",
-            "notification": {"channel_id": settings.FCM_ANDROID_CHANNEL_ID, "sound": "default"},
-        },
-        "apns": {"payload": {"aps": {"sound": "default"}}},
+        "data": {str(k): "" if v is None else str(v) for k, v in payload.items()},
+        # HIGH: entrega na hora mesmo com o aparelho em modo de economia (Doze).
+        "android": {"priority": "HIGH"},
     }
     url = FCM_SEND_URL.format(project=urllib.parse.quote(project_id(), safe=""))
     result = _post(url, {"message": message}, {"Authorization": f"Bearer {access_token()}"})

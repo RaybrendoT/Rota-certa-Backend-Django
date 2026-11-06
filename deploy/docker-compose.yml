@@ -60,6 +60,8 @@ services:
     restart: unless-stopped
     environment:
       API_BASE_URL: /api
+      GOOGLE_MAPS_BROWSER_KEY: ${GOOGLE_MAPS_BROWSER_KEY:-}
+      GOOGLE_MAPS_MAP_ID: ${GOOGLE_MAPS_MAP_ID:-DEMO_MAP_ID}
 
   # HTTPS automático (Let's Encrypt) e roteamento entre backend e frontend.
   caddy:

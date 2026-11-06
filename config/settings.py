@@ -209,7 +209,7 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'core.pagination.StandardPagination',
     'PAGE_SIZE': 10,
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
@@ -297,7 +297,6 @@ PLANNING_MODEL = config("PLANNING_MODEL", default="claude-opus-5-5")
 FCM_SERVICE_ACCOUNT_FILE = config("FCM_SERVICE_ACCOUNT_FILE", default="")
 FCM_SERVICE_ACCOUNT_JSON = config("FCM_SERVICE_ACCOUNT_JSON", default="")
 FCM_PROJECT_ID = config("FCM_PROJECT_ID", default="")  # vazio = project_id da conta de serviço
-FCM_ANDROID_CHANNEL_ID = config("FCM_ANDROID_CHANNEL_ID", default="avisos_da_van")
 FCM_HTTP_TIMEOUT = config("FCM_HTTP_TIMEOUT", default=15, cast=int)
 # Envia numa thread depois do commit; False envia na hora (testes).
 PUSH_ASYNC = config("PUSH_ASYNC", default=True, cast=bool)

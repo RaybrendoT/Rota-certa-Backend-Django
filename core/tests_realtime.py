@@ -117,6 +117,7 @@ class CollaboratorRoutesTests(RealtimeTestCase):
         [boarding] = [p for p in self.broadcasts(route_group(self.route.pk)) if p["type"] == "boarding_status"]
         self.assertEqual(boarding["status"], "confirmed")
         self.assertEqual(boarding["route_passenger_id"], self.passenger.pk)
+        self.assertEqual((boarding["route_name"], boarding["person_name"]), ("Rota A", "Fulano"))
         [pushed] = self.broadcasts(person_group(self.driver_person.pk))
         self.assertEqual(pushed["notification"]["id"], notification.pk)
 
@@ -226,6 +227,8 @@ class RouteEventNotificationTests(RealtimeTestCase):
         self.assertEqual(notification.message, "A rota Rota A foi iniciada.")
         [event] = [p for p in self.broadcasts(route_group(self.route.pk)) if p["type"] == "route_event"]
         self.assertEqual(event["route_status"], "in_route")
+        self.assertEqual(event["route_name"], "Rota A")
+        self.assertEqual(event["id"], RouteEvent.objects.get().pk)
         self.assertFalse(self.notifications_of(self.manager_person).exists())
 
     def test_atraso_leva_descricao(self):
