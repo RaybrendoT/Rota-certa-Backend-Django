@@ -25,6 +25,7 @@ from .planning.views import DemandMapView, PickupSuggestionsView, PlanningConver
 from .profile_photo import MyPhotoView
 from .push_views import PushDeviceUnregisterView, PushDeviceView
 from .reports import AttendanceDetailView, ReportOptionsView, ReportView
+from .route_builder_views import RouteBuilderViewSet
 from .views import HealthView
 from .viewsets import (
     AddressViewSet,
@@ -59,6 +60,7 @@ router.register(r"vehicles", VehicleViewSet,basename='vehicle')
 router.register(r"me/routes", CollaboratorRouteViewSet, basename='collaborator-route')
 router.register(r"notifications", NotificationViewSet, basename='notification')
 router.register(r"planning", PlanningConversationViewSet, basename='planning')
+router.register(r"route-builder", RouteBuilderViewSet, basename='route-builder')
 router.register(r"address-reviews", AddressReviewViewSet, basename='address-review')
 
 urlpatterns = [
