@@ -224,7 +224,7 @@ class RouteEventNotificationTests(RealtimeTestCase):
         self.create_event(event_type="departure")
         [notification] = self.notifications_of(self.employee_person)
         self.assertEqual(notification.kind, Notification.Kind.ROUTE_DEPARTURE)
-        self.assertEqual(notification.message, "A rota Rota A foi iniciada.")
+        self.assertEqual(notification.message, "A Rota A foi iniciada.")
         [event] = [p for p in self.broadcasts(route_group(self.route.pk)) if p["type"] == "route_event"]
         self.assertEqual(event["route_status"], "in_route")
         self.assertEqual(event["route_name"], "Rota A")
@@ -234,7 +234,7 @@ class RouteEventNotificationTests(RealtimeTestCase):
     def test_atraso_leva_descricao(self):
         self.create_event(event_type="delay", description="Trânsito intenso")
         [notification] = self.notifications_of(self.employee_person)
-        self.assertEqual(notification.title, "Atraso na rota Rota A")
+        self.assertEqual(notification.title, "Atraso na Rota A")
         self.assertEqual(notification.message, "Trânsito intenso")
 
     def test_parada_no_ponto_do_passageiro(self):

@@ -205,3 +205,21 @@ class SimulatorTests(EtaTestCase):
         self.assertEqual(list(self.route.events.order_by("timestamp").values_list("event_type", flat=True)),
                          ["departure", "arrival"])
         self.assertTrue(StopArrival.objects.filter(passenger=self.passenger).exists())
+
+
+class RouteRefTests(EtaTestCase):
+    def test_nao_repete_rota_no_texto(self):
+        from core.notifications import route_ref
+
+        self.assertEqual(route_ref("Rota Manaus 01"), "Rota Manaus 01")
+        self.assertEqual(route_ref("ROTA 2"), "ROTA 2")
+        self.assertEqual(route_ref("Centro"), "rota Centro")
+        self.assertEqual(route_ref("Rotatória Sul"), "rota Rotatória Sul")
+
+    def test_aviso_de_chegada_sem_rota_repetida(self):
+        self.route.name = "Rota Manaus 01"
+        self.route.save(update_fields=["name"])
+        self.drive(-60.0)
+        self.drive(-60.012)
+        [notification] = self.approaching()
+        self.assertTrue(notification.message.startswith("A Rota Manaus 01 chega a Ponto 2"), notification.message)
