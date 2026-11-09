@@ -5,6 +5,7 @@ Toda notificação é gravada (aba Avisos tem histórico) e enviada ao grupo
 person_<id> do WebSocket. Mensagens de estado da rota (posição, eventos,
 embarques) vão para o grupo route_<id>.
 """
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -66,11 +67,17 @@ def _stop_address(passenger):
     return stop.meeting_point.address
 
 
+def route_ref(name):
+    """'rota X' nas mensagens, sem repetir quando o nome já começa com 'Rota' ("A Rota Manaus 01 ...")."""
+    name = (name or "").strip()
+    return name if re.match(r"rota\b", name, re.IGNORECASE) else f"rota {name}"
+
+
 _EVENT_MESSAGES = {
-    "departure": (Kind.ROUTE_DEPARTURE, "Seu ônibus saiu", "A rota {route} foi iniciada."),
-    "arrival": (Kind.ROUTE_ARRIVAL, "Rota finalizada", "A rota {route} chegou ao destino."),
-    "delay": (Kind.ROUTE_DELAY, "Atraso na rota {route}", "{description}"),
-    "incident": (Kind.ROUTE_INCIDENT, "Incidente na rota {route}", "{description}"),
+    "departure": (Kind.ROUTE_DEPARTURE, "Seu ônibus saiu", "A {route} foi iniciada."),
+    "arrival": (Kind.ROUTE_ARRIVAL, "Rota finalizada", "A {route} chegou ao destino."),
+    "delay": (Kind.ROUTE_DELAY, "Atraso na {route}", "{description}"),
+    "incident": (Kind.ROUTE_INCIDENT, "Incidente na {route}", "{description}"),
 }
 
 
@@ -93,7 +100,7 @@ def on_route_event_created(event):
     passengers = list(_active_passengers(route))
     if event.event_type in _EVENT_MESSAGES:
         kind, title, message = _EVENT_MESSAGES[event.event_type]
-        fmt = {"route": route.name, "description": event.description}
+        fmt = {"route": route_ref(route.name), "description": event.description}
         notify(
             [p.person for p in passengers],
             kind=kind,
@@ -114,7 +121,7 @@ def on_route_event_created(event):
                 [p.person],
                 kind=Kind.BUS_AT_STOP,
                 title="O ônibus chegou ao seu ponto",
-                message=f"A rota {route.name} está em {p.route_stop.meeting_point.name}.",
+                message=f"A {route_ref(route.name)} está em {p.route_stop.meeting_point.name}.",
                 route=route,
             )
 
@@ -206,7 +213,7 @@ def on_vehicle_location(location):
                 and estimate["minutes"] <= approaching_minutes
             )
             message = (
-                f"A rota {route.name} chega a {p.route_stop.meeting_point.name} "
+                f"A {route_ref(route.name)} chega a {p.route_stop.meeting_point.name} "
                 f"em cerca de {estimate['minutes']} min."
             )
         else:
@@ -214,7 +221,7 @@ def on_vehicle_location(location):
             distance = distance_meters(location.latitude, location.longitude, addr.latitude, addr.longitude)
             should_notify = STOP_RADIUS_METERS < distance <= APPROACHING_RADIUS_METERS
             message = (
-                f"A rota {route.name} está a cerca de {round(distance, -1):.0f} m de "
+                f"A {route_ref(route.name)} está a cerca de {round(distance, -1):.0f} m de "
                 f"{p.route_stop.meeting_point.name}."
             )
         if should_notify:

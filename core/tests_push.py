@@ -96,7 +96,7 @@ class PushTests(RealtimeTestCase):
         self.assertNotIn("notification", message)  # só data: o app monta a notificação
         self.assertEqual(message["data"], {
             "notification_id": str(notification.pk), "kind": "route_departure", "route_id": str(self.route.pk),
-            "title": "Seu ônibus saiu", "message": "A rota Rota A foi iniciada.",
+            "title": "Seu ônibus saiu", "message": "A Rota A foi iniciada.",
         })
         self.assertEqual(message["android"], {"priority": "HIGH"})
         claims = jwt.decode(self.oauth[0]["assertion"][0], _KEY.public_key(), algorithms=["RS256"],
