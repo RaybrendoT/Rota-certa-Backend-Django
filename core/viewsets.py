@@ -102,9 +102,13 @@ class BaseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if hasattr(self.queryset.model, "is_active"):
+        if hasattr(self.queryset.model, "is_active") and self.active_only():
             return qs.filter(is_active=True)
         return qs
+
+    def active_only(self) -> bool:
+        """Esconde os inativos; um viewset pode liberar (ex.: filtro de status de Funcionários)."""
+        return True
 
 
 class CompanyScopedQuerySetMixin:
@@ -170,6 +174,13 @@ class PersonViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
         if self.action in self.GERENTE_ACTIONS:
             return [IsAuthenticated(), IsGerente()]
         return [IsAuthenticated(), IsManagerOrGerente()]
+
+    def active_only(self):
+        # Lista: só ativos, a menos que o filtro peça ?status=inactive ou ?status=all (PersonFilter).
+        # Detalhe/edição: inativos também, para abrir e reativar a pessoa pela lista.
+        if self.action == "list":
+            return self.request.query_params.get("status") not in ("inactive", "all")
+        return False
 
     @action(detail=True, methods=["get"])
     def overview(self, request, pk=None):

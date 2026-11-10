@@ -1,4 +1,5 @@
 import django_filters
+from django.db.models import Q
 
 from .models import Company, MeetingPoint, Person, Route, RouteEvent, RoutePassenger, RouteStop, Schedule, Vehicle
 
@@ -17,10 +18,46 @@ class PersonFilter(django_filters.FilterSet):
     # Perfil de acesso vive em AccessAccount, não em Person; usado para listar gestores
     # (?role=MANAGER) e para checar se uma empresa já tem gestor (?company_id=X&role=MANAGER).
     role = django_filters.CharFilter(field_name="access_account__role")
+    # Filtros da tela de Funcionários. Tipo de acesso: DRIVER (motorista), EMPLOYEE (colaborador
+    # sem perfil de gestão), MANAGER (gestor) ou GERENTE.
+    access = django_filters.ChoiceFilter(
+        choices=[("DRIVER", "Motorista"), ("EMPLOYEE", "Funcionário"), ("MANAGER", "Gestor"), ("GERENTE", "Gerente")],
+        method="filter_access",
+    )
+    # active (padrão, o mesmo de antes), inactive ou all. Ver PersonViewSet.active_only.
+    status = django_filters.ChoiceFilter(
+        choices=[("active", "Ativo"), ("inactive", "Inativo"), ("all", "Todos")], method="filter_status"
+    )
+    # Nome, matrícula ou CNH, sem diferenciar maiúsculas.
+    search = django_filters.CharFilter(method="filter_search")
 
     class Meta:
         model = Person
         fields = ["company_id", "type", "role", "is_active"]
+
+    def filter_access(self, queryset, name, value):
+        if value == "DRIVER":
+            return queryset.filter(type=Person.PersonType.DRIVER)
+        if value == "EMPLOYEE":
+            return queryset.filter(type=Person.PersonType.EMPLOYEE).filter(
+                Q(access_account__isnull=True) | Q(access_account__role=value)
+            )
+        return queryset.filter(access_account__role=value)
+
+    def filter_status(self, queryset, name, value):
+        if value == "inactive":
+            return queryset.filter(is_active=False)
+        if value == "active":
+            return queryset.filter(is_active=True)
+        return queryset
+
+    def filter_search(self, queryset, name, value):
+        value = value.strip()
+        if not value:
+            return queryset
+        return queryset.filter(
+            Q(name__icontains=value) | Q(employee_code__icontains=value) | Q(license_number__icontains=value)
+        )
 
 
 class DriverFilter(django_filters.FilterSet):
