@@ -975,6 +975,34 @@ python manage.py relatorio_eta --data 2026-11-10 --rota 2 --saida eta.csv
 O resumo do `relatorio_eta` mostra o erro médio geral e a ~10, ~5 e ~2 minutos da chegada
 (positivo = a previsão deu mais tempo do que o ônibus levou).
 
+# 📥 Importação de funcionários por CSV
+
+Cadastra de uma vez a sede, os colaboradores, gestores, gerentes e motoristas (com veículo) de uma
+empresa. Tudo é validado antes; com qualquer erro, nada é gravado e o comando lista as linhas com
+problema. Rodar de novo é seguro: quem já existe (mesma matrícula/CNH) é pulado.
+
+```bash
+# CSV fictício de exemplo: 500 colaboradores, 25 motoristas, 1 gestor e 1 gerente (MostraTech)
+python manage.py gerar_csv_exemplo --saida exemplos/mostratech_funcionarios.csv
+
+python manage.py importar_csv exemplos/mostratech_funcionarios.csv --empresa MostraTech --dominio mostratech.com.br --dry-run
+python manage.py importar_csv exemplos/mostratech_funcionarios.csv --empresa MostraTech --dominio mostratech.com.br
+```
+
+Colunas (vírgula ou ponto e vírgula, UTF-8 ou Excel): `perfil, nome, matricula, cnh, telefone, email,
+logradouro, numero, bairro, cidade, uf, cep, latitude, longitude, placa, modelo_veiculo, capacidade`.
+
+| perfil | obrigatório |
+|---|---|
+| `EMPRESA` | nome e endereço completo da sede (destino das rotas); no máximo uma linha |
+| `COLABORADOR` | nome, matrícula, telefone e endereço completo de casa |
+| `GESTOR` / `GERENTE` | nome, matrícula e telefone |
+| `MOTORISTA` | nome, CNH, telefone, placa, modelo e capacidade do veículo |
+
+Login: e-mail = `matrícula (ou CNH)@domínio`; senha inicial = matrícula (ou CNH) + 4 últimos dígitos do
+telefone, com troca no primeiro acesso. A coluna `email` é opcional e, se preenchida, precisa bater.
+Com 500+ pessoas a importação leva alguns minutos (cada senha é criptografada).
+
 # 🧪 Exemplos de utilização
 
 ## Criando um funcionário
