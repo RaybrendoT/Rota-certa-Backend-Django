@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 from io import StringIO
 
@@ -240,6 +241,17 @@ class ManagerPermissionTests(RoleTestCase):
         client = self.client_for(self.manager_person)
         route_names = {r["name"] for r in client.get("/api/routes/").json()["results"]}
         self.assertEqual(route_names, {"Rota A"})
+
+    def test_filtra_rotas_fixas_e_avulsas(self):
+        Route.objects.create(company=self.company, name="Extra 10/11", service_date=datetime.date(2026, 11, 10))
+        client = self.client_for(self.manager_person)
+
+        def names(kind):
+            return {r["name"] for r in client.get("/api/routes/", {"kind": kind}).json()["results"]}
+
+        self.assertEqual(names("fixed"), {"Rota A"})
+        self.assertEqual(names("extra"), {"Extra 10/11"})
+        self.assertEqual(client.get("/api/routes/", {"kind": "outro"}).status_code, 400)
 
     def test_gestor_nao_ve_nem_edita_rota_de_outra_empresa(self):
         client = self.client_for(self.manager_person)
