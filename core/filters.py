@@ -53,6 +53,11 @@ class RouteFilter(django_filters.FilterSet):
     company_id = django_filters.NumberFilter(field_name="company_id")
     name = django_filters.CharFilter(lookup_expr="icontains")
     vehicle_id = django_filters.NumberFilter(field_name="vehicle_id")
+    # fixed = rota diária (sem data, repete nos dias do turno); extra = avulsa, montada para um dia.
+    kind = django_filters.ChoiceFilter(choices=(("fixed", "Fixa"), ("extra", "Avulsa")), method="filter_kind")
+
+    def filter_kind(self, queryset, name, value):
+        return queryset.filter(service_date__isnull=value == "fixed")
 
     class Meta:
         model = Route
