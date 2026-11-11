@@ -1,3 +1,5 @@
+from datetime import time
+
 import django_filters
 from django.db.models import Q
 
@@ -111,10 +113,39 @@ class RouteStopFilter(django_filters.FilterSet):
 
 class ScheduleFilter(django_filters.FilterSet):
     company_id = django_filters.NumberFilter(field_name="company_id")
+    # Filtros da tela de Horários. status: active (padrão), inactive ou all (ScheduleViewSet.active_only).
+    status = django_filters.ChoiceFilter(
+        choices=[("active", "Ativo"), ("inactive", "Inativo"), ("all", "Todos")], method="filter_status"
+    )
+    # Turnos que rodam neste dia (MON…SUN).
+    weekday = django_filters.ChoiceFilter(
+        choices=[(code, code) for code in ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")], method="filter_weekday"
+    )
+    # Período do horário de chegada: manhã (antes das 12h), tarde (12h–18h) ou noite (18h em diante).
+    period = django_filters.ChoiceFilter(
+        choices=[("morning", "Manhã"), ("afternoon", "Tarde"), ("night", "Noite")], method="filter_period"
+    )
 
     class Meta:
         model = Schedule
         fields = ["company_id", "is_active"]
+
+    def filter_status(self, queryset, name, value):
+        if value == "inactive":
+            return queryset.filter(is_active=False)
+        if value == "active":
+            return queryset.filter(is_active=True)
+        return queryset
+
+    def filter_weekday(self, queryset, name, value):
+        return queryset.filter(weekdays__contains=[value])
+
+    def filter_period(self, queryset, name, value):
+        if value == "morning":
+            return queryset.filter(time__lt=time(12, 0))
+        if value == "afternoon":
+            return queryset.filter(time__gte=time(12, 0), time__lt=time(18, 0))
+        return queryset.filter(time__gte=time(18, 0))
 
 
 class MeetingPointFilter(django_filters.FilterSet):
