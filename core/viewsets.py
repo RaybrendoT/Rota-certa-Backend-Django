@@ -17,6 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
+from . import occurrences
 from .boarding import record_boarding
 from .dates import local_today
 from .driver_serializers import DriverRouteBoardSerializer
@@ -632,7 +633,14 @@ class RouteStopViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
 
 
 class RouteEventViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
-    queryset = RouteEvent.objects.select_related("route")
+    """
+    Eventos de rota e ocorrências (atrasos e incidentes; ver core/occurrences.py).
+
+    O gestor também registra ocorrências sem posição, filtra (?occurrence=true&status=open,in_progress)
+    e muda o status: POST route-events/{id}/start/, /resolve/ {"resolution"} e /reopen/.
+    """
+
+    queryset = RouteEvent.objects.select_related("route", "route__vehicle__driver", "reported_by", "resolved_by")
     serializer_class = RouteEventSerializer
     company_lookup = "route__company"
 
@@ -652,7 +660,9 @@ class RouteEventViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         if is_driver(self.request):
-            qs = qs.filter(route__vehicle__driver=self.request.user.person)
+            # O app do motorista exige posição em cada evento: as ocorrências do sistema e do gestor
+            # (sem latitude/longitude) ficam só no painel.
+            qs = qs.filter(route__vehicle__driver=self.request.user.person, latitude__isnull=False)
         return qs
 
     def perform_create(self, serializer):
@@ -663,7 +673,43 @@ class RouteEventViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
             raise PermissionDenied("Esta rota não está atribuída a você.")
         if is_manager(self.request) and route.company_id != self.request.user.person.company_id:
             raise PermissionDenied("Esta rota não pertence à sua empresa.")
-        serializer.save()
+        if is_driver(self.request):
+            serializer.save(source=RouteEvent.Source.DRIVER, reported_by=self.request.user.person)
+        else:
+            # Registrada pelo painel: só avisa os passageiros se o gestor marcar.
+            notify = serializer.validated_data.get("notify_passengers", False)
+            serializer.save(
+                source=RouteEvent.Source.MANAGER, reported_by=self.request.user.person, notify_passengers=notify,
+            )
+
+    def list(self, request, *args, **kwargs):
+        # O gestor vê os atrasos detectados pelo sistema assim que abre a lista.
+        if is_manager(request):
+            occurrences.detect(request.user.person.company)
+        return super().list(request, *args, **kwargs)
+
+    def _status_action(self, request, change):
+        event = self.get_object()
+        try:
+            change(event)
+        except occurrences.OccurrenceError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(self.get_serializer(event).data)
+
+    @action(detail=True, methods=["post"])
+    def start(self, request, pk=None):
+        """Gestor assumiu a ocorrência (em andamento)."""
+        return self._status_action(request, lambda event: occurrences.start(event, request.user.person))
+
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        """Resolve com o que foi feito: {"resolution": "..."}."""
+        resolution = request.data.get("resolution", "")
+        return self._status_action(request, lambda event: occurrences.resolve(event, request.user.person, resolution))
+
+    @action(detail=True, methods=["post"])
+    def reopen(self, request, pk=None):
+        return self._status_action(request, lambda event: occurrences.reopen(event, request.user.person))
 
 
 class VehicleViewSet(CompanyScopedQuerySetMixin, BaseViewSet):

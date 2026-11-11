@@ -97,6 +97,9 @@ def on_route_event_created(event):
         },
     )
 
+    # Ocorrências do sistema (e as do gestor sem "avisar passageiros") não vão para os passageiros.
+    if not getattr(event, "notify_passengers", True):
+        return
     passengers = list(_active_passengers(route))
     if event.event_type in _EVENT_MESSAGES:
         kind, title, message = _EVENT_MESSAGES[event.event_type]
@@ -112,7 +115,8 @@ def on_route_event_created(event):
         at_stop = [
             p
             for p in passengers
-            if (addr := _stop_address(p))
+            if event.latitude is not None
+            and (addr := _stop_address(p))
             and distance_meters(event.latitude, event.longitude, addr.latitude, addr.longitude)
             <= STOP_RADIUS_METERS
         ]

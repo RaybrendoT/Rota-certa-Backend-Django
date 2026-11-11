@@ -239,16 +239,29 @@ class RoutePassengerSerializer(BaseSerializer):
 
 class RouteEventSerializer(BaseSerializer):
     route_name = serializers.CharField(source="route.name", read_only=True)
+    # Opcionais: o app do motorista manda a posição; o gestor e o sistema registram sem ela.
     latitude = serializers.DecimalField(
         max_digits=9,
         decimal_places=6,
+        required=False,
+        allow_null=True,
         help_text="Latitude em graus decimais. Ex: -23.550520"
     )
     longitude = serializers.DecimalField(
         max_digits=9,
         decimal_places=6,
+        required=False,
+        allow_null=True,
         help_text="Longitude em graus decimais. Ex: -46.633308"
     )
+    source_label = serializers.CharField(source="get_source_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    category_label = serializers.CharField(source="get_category_display", read_only=True)
+    reported_by_name = serializers.CharField(source="reported_by.name", read_only=True, default=None)
+    resolved_by_name = serializers.CharField(source="resolved_by.name", read_only=True, default=None)
+    driver_name = serializers.SerializerMethodField()
+    # Só na criação pelo painel: avisar os passageiros da rota (push e app). O motorista sempre avisa.
+    notify_passengers = serializers.BooleanField(write_only=True, required=False)
     description = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -261,13 +274,25 @@ class RouteEventSerializer(BaseSerializer):
     class Meta(BaseSerializer.Meta):
         model = RouteEvent
         fields = "__all__"
+        # Origem, status e resolução são definidos pelo servidor (criação e ações resolve/start/reopen).
+        read_only_fields = (
+            "source", "status", "auto_code", "service_date", "reported_by", "resolved_at", "resolved_by", "resolution",
+        )
+
+    def get_driver_name(self, obj):
+        vehicle = obj.route.vehicle if obj.route.vehicle_id else None
+        return vehicle.driver.name if vehicle and vehicle.driver_id else None
 
     def validate_latitude(self, value):
+        if value is None:
+            return value
         if value < -90 or value > 90:
             raise serializers.ValidationError("Latitude deve estar entre -90 e 90.")
         return value
 
     def validate_longitude(self, value):
+        if value is None:
+            return value
         if value < -180 or value > 180:
             raise serializers.ValidationError("Longitude deve estar entre -180 e 180.")
         return value
@@ -280,6 +305,17 @@ class RouteEventSerializer(BaseSerializer):
                 "Descrição é obrigatória para eventos do tipo delay e incident."
             )
         return value
+
+    def create(self, validated_data):
+        notify_passengers = validated_data.pop("notify_passengers", True)
+        instance = RouteEvent(**validated_data)
+        instance.notify_passengers = notify_passengers  # lido pelo sinal de post_save (core.notifications)
+        instance.save()
+        return instance
+
+    def update(self, instance, validated_data):
+        validated_data.pop("notify_passengers", None)
+        return super().update(instance, validated_data)
 
 
 
