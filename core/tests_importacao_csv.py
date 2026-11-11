@@ -1,13 +1,15 @@
 import io
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from core.access_passwords import generate_initial_access_password
 from core.importacao_csv import ImportErrors, import_people
 from core.models import AccessAccount, Address, Company, Person, Vehicle
 from core.self_address import company_location
+from core.tests import RoleTestCase
 
 HEADER = "perfil,nome,matricula,cnh,telefone,email,logradouro,numero,bairro,cidade,uf,cep,latitude,longitude,placa,modelo_veiculo,capacidade\n"
 SEDE = "EMPRESA,MostraTech,,,,,Avenida Buriti,1500,Distrito Industrial I,Manaus,AM,69075-000,-3.113516,-59.967525,,,\n"
@@ -94,3 +96,69 @@ class ImportarCsvTests(TestCase):
         handle.close()
         self.addCleanup(lambda: __import__("os").unlink(handle.name))
         return handle.name
+
+
+class ImportarCsvPainelTests(RoleTestCase):
+    """POST /api/people/import/: prévia, confirmação e permissões."""
+
+    URL = "/api/people/import/"
+
+    def upload(self, client, *lines, **extra):
+        data = (HEADER + "".join(lines)).encode("utf-8")
+        return client.post(self.URL, {"file": SimpleUploadedFile("lista.csv", data, "text/csv"), **extra}, format="multipart")
+
+    def acme(self, line):
+        return line.replace("mostratech.com.br", "acme.com").replace("MostraTech", "Acme")
+
+    def test_gestor_ve_a_previa_sem_gravar(self):
+        r = self.upload(self.client_for(self.manager_person), self.acme(SEDE), MOTORISTA, COLAB)
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertFalse(body["confirmed"])
+        self.assertEqual(body["created"], {"employees": 1, "drivers": 1, "managers": 0})
+        self.assertEqual((body["vehicles"], body["company"]["name"]), (1, "Acme"))
+        self.assertFalse(Person.objects.filter(employee_code="MT0001").exists())
+
+    @override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.PBKDF2PasswordHasher"])
+    def test_gestor_confirma_e_grava_na_propria_empresa(self):
+        r = self.upload(self.client_for(self.manager_person), COLAB, MOTORISTA, confirm="true")
+        self.assertEqual(r.status_code, 201, r.content)
+        ana = Person.objects.get(employee_code="MT0001")
+        self.assertEqual(ana.company, self.company)
+        self.assertEqual(ana.access_account.email, "mt0001@acme.com")
+        self.assertTrue(ana.access_account.password_hash.startswith("pbkdf2_sha256$20000$"))
+        self.assertTrue(ana.access_account.check_password(generate_initial_access_password(ana)))
+        again = self.upload(self.client_for(self.manager_person), COLAB, MOTORISTA, confirm="true").json()
+        self.assertEqual((again["skipped"], again["created"]["employees"]), (2, 0))
+
+    def test_gestor_nao_cria_gestor_nem_gerente(self):
+        r = self.upload(self.client_for(self.manager_person), GESTOR, GERENTE, COLAB, confirm="true")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["errors"], [
+            "Linha 2: perfil GESTOR não pode ser importado aqui.",
+            "Linha 3: perfil GERENTE não pode ser importado aqui.",
+        ])
+        self.assertFalse(Person.objects.filter(employee_code="MT0001").exists())
+
+    def test_erros_por_linha_e_nada_gravado(self):
+        r = self.upload(self.client_for(self.manager_person), COLAB, COLAB.replace("Rua B", ""), confirm="true")
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(any("Linha 3" in e for e in r.json()["errors"]))
+        self.assertFalse(Person.objects.filter(employee_code="MT0001").exists())
+
+    def test_gerente_escolhe_a_empresa_e_pode_criar_gestor(self):
+        client = self.client_for(self.gerente_person)
+        self.assertEqual(self.upload(client, COLAB).status_code, 400)
+        r = self.upload(client, self.acme(GESTOR).replace("mtg001@acme.com", ""), company=self.other_company.pk,
+                        confirm="true")
+        self.assertEqual(r.status_code, 201, r.content)
+        gestor = Person.objects.get(employee_code="MTG001")
+        self.assertEqual((gestor.company, gestor.access_account.role), (self.other_company, "MANAGER"))
+
+    def test_colaborador_e_motorista_nao_importam(self):
+        for person in (self.employee_person, self.driver_person):
+            self.assertEqual(self.upload(self.client_for(person), COLAB).status_code, 403)
+
+    def test_sem_arquivo(self):
+        r = self.client_for(self.manager_person).post(self.URL, {}, format="multipart")
+        self.assertEqual(r.status_code, 400)
