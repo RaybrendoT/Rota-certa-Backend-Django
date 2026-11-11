@@ -23,6 +23,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 
+from .access_passwords import fast_initial_passwords
 from .models import AccessAccount, Address, Company, Person, Vehicle, normalize_email
 
 COLUMNS = [
@@ -35,6 +36,7 @@ ROLE_BY_PROFILE = {"GESTOR": AccessAccount.Role.MANAGER, "GERENTE": AccessAccoun
 ADDRESS_FIELDS = ("logradouro", "numero", "cidade", "uf", "cep", "latitude", "longitude")
 # Latitude/longitude plausíveis para o Brasil (pega coordenada trocada ou sem sinal).
 LAT_RANGE, LNG_RANGE = (-34.0, 6.0), (-74.0, -34.0)
+MAX_ROWS = 2000
 
 
 class ImportErrors(Exception):
@@ -168,10 +170,28 @@ def _address(row, **owner):
     )
 
 
-def import_people(data: bytes, company_name: str, domain: str = "", dry_run: bool = False) -> ImportResult:
-    """Valida tudo e, sem erros (e sem dry_run), grava numa transação só."""
+def import_people(data: bytes, company_name: str = "", domain: str = "", dry_run: bool = False,
+                  company: Company | None = None, allowed_profiles=PROFILES) -> ImportResult:
+    """
+    Valida tudo e, sem erros (e sem dry_run), grava numa transação só.
+
+    `company` já resolvida (painel: a empresa do gestor) dispensa a busca pelo nome.
+    `allowed_profiles` limita os perfis aceitos (o painel não cria gerente, nem gestor pelo gestor).
+    """
     rows = read_rows(data)
-    company = Company.objects.filter(name__iexact=company_name).first()
+    if len(rows) > MAX_ROWS:
+        raise ImportErrors([f"O arquivo tem {len(rows)} linhas; o limite é {MAX_ROWS} por importação."])
+    if company is None:
+        company = Company.objects.filter(name__iexact=company_name).first()
+    else:
+        company_name = company.name
+    not_allowed = [
+        f"Linha {n}: perfil {row.get('perfil', '').upper()} não pode ser importado aqui."
+        for n, row in rows
+        if row.get("perfil", "").upper() in PROFILES and row.get("perfil", "").upper() not in allowed_profiles
+    ]
+    if not_allowed:
+        raise ImportErrors(not_allowed)
     domain = (domain or (company.get_email_domain() if company else "")).strip().lower().lstrip("@")
     if not domain:
         raise ImportErrors(["Informe o domínio de e-mail da empresa (--dominio), ex.: mostratech.com.br."])
@@ -201,7 +221,7 @@ def import_people(data: bytes, company_name: str, domain: str = "", dry_run: boo
         return result
 
     errors = []
-    with transaction.atomic():
+    with transaction.atomic(), fast_initial_passwords():
         if company is None:
             company = Company.objects.create(name=company_name, email_domain=domain)
         elif not company.email_domain:

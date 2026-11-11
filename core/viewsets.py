@@ -12,6 +12,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.filters import OrderingFilter
+from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
@@ -33,6 +34,7 @@ from .filters import (
     ScheduleFilter,
     VehicleFilter,
 )
+from .importacao_csv import ImportErrors, import_people
 from .models import (
     AccessAccount,
     Address,
@@ -111,6 +113,9 @@ class BaseViewSet(viewsets.ModelViewSet):
         return True
 
 
+IMPORT_MAX_BYTES = 2_000_000  # ~10 mil linhas; o limite real de linhas está em importacao_csv.MAX_ROWS
+
+
 class CompanyScopedQuerySetMixin:
     """
     Restringe o gestor (MANAGER) à própria empresa — na leitura (get_queryset) e na
@@ -181,6 +186,44 @@ class PersonViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
         if self.action == "list":
             return self.request.query_params.get("status") not in ("inactive", "all")
         return False
+
+    @action(detail=False, methods=["post"], url_path="import", parser_classes=[MultiPartParser])
+    def import_csv(self, request):
+        """
+        POST people/import/ (multipart: file, confirm=true|false, company=<id> só para o gerente).
+
+        Sem confirm, só valida e devolve a prévia; com confirm=true, grava tudo ou nada.
+        O gestor importa na própria empresa e não cria gestor nem gerente (só o gerente promove).
+        """
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise ValidationError({"file": "Envie o arquivo CSV no campo file."})
+        if upload.size > IMPORT_MAX_BYTES:
+            raise ValidationError({"file": f"Arquivo maior que {IMPORT_MAX_BYTES // 1_000_000} MB."})
+        if is_manager(request):
+            company = request.user.person.company
+            allowed = ("EMPRESA", "COLABORADOR", "MOTORISTA")
+        else:
+            company = Company.objects.filter(pk=request.data.get("company") or 0).first()
+            if company is None:
+                raise ValidationError({"company": "Escolha a empresa que vai receber a importação."})
+            allowed = ("EMPRESA", "COLABORADOR", "MOTORISTA", "GESTOR")
+        confirm = str(request.data.get("confirm", "")).lower() in ("1", "true", "sim")
+        try:
+            result = import_people(upload.read(), company=company, dry_run=not confirm, allowed_profiles=allowed)
+        except ImportErrors as exc:
+            return Response({"errors": exc.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            "confirmed": confirm,
+            "company": {"id": company.pk, "name": company.name, "email_domain": company.get_email_domain()},
+            "created": {
+                "employees": result.created["COLABORADOR"], "drivers": result.created["MOTORISTA"],
+                "managers": result.created["GESTOR"],
+            },
+            "vehicles": result.vehicles,
+            "skipped": result.skipped,
+            "company_address": result.company_address,
+        }, status=status.HTTP_201_CREATED if confirm else status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"])
     def overview(self, request, pk=None):

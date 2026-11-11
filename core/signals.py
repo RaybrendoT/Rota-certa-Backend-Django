@@ -5,7 +5,7 @@ from django.db import IntegrityError
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from .access_passwords import generate_initial_access_password
+from .access_passwords import generate_initial_access_password, set_initial_password
 from .models import AccessAccount, Company, Person, RouteEvent
 from .notifications import on_route_event_created
 
@@ -114,10 +114,7 @@ def _create_access_account_if_missing(instance):
         must_change_password=True,
     )
     initial = getattr(settings, "ACCESS_ACCOUNT_AUTO_INITIAL_PASSWORD", "") or ""
-    if initial:
-        acc.set_password(initial)
-    else:
-        acc.set_password(generate_initial_access_password(instance))
+    set_initial_password(acc, initial or generate_initial_access_password(instance))
 
     try:
         acc.save()

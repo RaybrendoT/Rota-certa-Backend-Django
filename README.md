@@ -1001,7 +1001,13 @@ logradouro, numero, bairro, cidade, uf, cep, latitude, longitude, placa, modelo_
 
 Login: e-mail = `matrícula (ou CNH)@domínio`; senha inicial = matrícula (ou CNH) + 4 últimos dígitos do
 telefone, com troca no primeiro acesso. A coluna `email` é opcional e, se preenchida, precisa bater.
-Com 500+ pessoas a importação leva alguns minutos (cada senha é criptografada).
+A senha inicial é gravada com PBKDF2 e menos iterações (20 mil), só durante a importação: 500 pessoas levam
+segundos, e a troca obrigatória no 1º acesso grava a senha nova com o hasher padrão.
+
+**Pelo painel:** Funcionários → **Importar CSV**. Mesmo arquivo e mesmas regras, com prévia antes de gravar
+(`POST /api/people/import/`, multipart `file`, `confirm=true` para gravar). O gestor importa na própria empresa
+só `EMPRESA`, `COLABORADOR` e `MOTORISTA`; o gerente escolhe a empresa e também pode importar `GESTOR`.
+Linhas `GERENTE` só pela linha de comando.
 
 # 🧪 Exemplos de utilização
 
