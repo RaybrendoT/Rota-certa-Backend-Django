@@ -592,18 +592,77 @@ class RouteEvent(BaseModel):
         verbose_name="rota",
     )
 
+    # Ocorrências são os eventos de atraso e incidente; partida, chegada e parada são registros
+    # da viagem. Ver core/occurrences.py para o fluxo (origem, status e detecção automática).
+    OCCURRENCE_TYPES = ("delay", "incident")
+
+    class Source(models.TextChoices):
+        DRIVER = "driver", "Motorista"
+        SYSTEM = "system", "Sistema"
+        MANAGER = "manager", "Gestor"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Aberta"
+        IN_PROGRESS = "in_progress", "Em andamento"
+        RESOLVED = "resolved", "Resolvida"
+
+    class Category(models.TextChoices):
+        TRAFFIC = "traffic", "Trânsito"
+        MECHANICAL = "mechanical", "Problema mecânico"
+        ACCIDENT = "accident", "Acidente"
+        WEATHER = "weather", "Chuva / alagamento"
+        PASSENGER = "passenger", "Passageiro"
+        ROAD = "road", "Via bloqueada / desvio"
+        SCHEDULE = "schedule", "Horário (detectado pelo sistema)"
+        OTHER = "other", "Outro"
+
     event_type = models.CharField("tipo", max_length=20, choices=EVENT_TYPE_CHOICES)
     description = models.TextField("descrição", blank=True)
-    latitude = models.DecimalField("latitude", max_digits=9, decimal_places=6)
-    longitude = models.DecimalField("longitude", max_digits=9, decimal_places=6)
+    # Opcionais: ocorrências do sistema e do gestor não têm posição do ônibus.
+    latitude = models.DecimalField("latitude", max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField("longitude", max_digits=9, decimal_places=6, null=True, blank=True)
     timestamp = models.DateTimeField("data/hora", auto_now_add=True)
+
+    source = models.CharField("origem", max_length=10, choices=Source.choices, default=Source.DRIVER, db_index=True)
+    category = models.CharField("categoria", max_length=20, choices=Category.choices, blank=True)
+    status = models.CharField("status", max_length=12, choices=Status.choices, default=Status.OPEN, db_index=True)
+    delay_minutes = models.PositiveSmallIntegerField("atraso estimado (min)", null=True, blank=True)
+    # Dia da operação (fuso local) a que a ocorrência se refere: filtros e detecção sem duplicar.
+    service_date = models.DateField("dia", null=True, blank=True, db_index=True)
+    # Regra que gerou a ocorrência do sistema (not_started, overdue, late_arrival); vazio nas demais.
+    auto_code = models.CharField("regra automática", max_length=20, blank=True)
+    reported_by = models.ForeignKey(
+        "Person", on_delete=models.SET_NULL, null=True, blank=True, related_name="reported_events",
+        verbose_name="registrada por",
+    )
+    resolved_at = models.DateTimeField("resolvida em", null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        "Person", on_delete=models.SET_NULL, null=True, blank=True, related_name="resolved_events",
+        verbose_name="resolvida por",
+    )
+    resolution = models.TextField("como foi resolvida", blank=True)
 
     class Meta:
         verbose_name = "evento de rota"
         verbose_name_plural = "eventos de rota"
+        indexes = [models.Index(fields=["route", "service_date", "event_type"])]
 
     def __str__(self):
         return f"{self.route.name} - {self.event_type}"
+
+    @property
+    def is_occurrence(self):
+        return self.event_type in self.OCCURRENCE_TYPES
+
+    def save(self, *args, **kwargs):
+        if self.service_date is None:
+            from core.dates import local_today
+
+            self.service_date = local_today()
+        # Partida, chegada e parada não têm o que resolver.
+        if not self.is_occurrence and self.status != self.Status.RESOLVED:
+            self.status = self.Status.RESOLVED
+        super().save(*args, **kwargs)
 
 class Vehicle(BaseModel):
     company = models.ForeignKey(

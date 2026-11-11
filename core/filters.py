@@ -160,10 +160,32 @@ class MeetingPointFilter(django_filters.FilterSet):
 class RouteEventFilter(django_filters.FilterSet):
     route_id = django_filters.NumberFilter(field_name="route__id")
     event_type = django_filters.BaseInFilter(field_name="event_type", lookup_expr="in")
+    # Tela de Ocorrências: ?occurrence=true (só atrasos e incidentes), status/origem (vírgula = vários),
+    # categoria e período pelo dia da operação.
+    occurrence = django_filters.BooleanFilter(method="filter_occurrence")
+    status = django_filters.BaseInFilter(field_name="status", lookup_expr="in")
+    source = django_filters.BaseInFilter(field_name="source", lookup_expr="in")
+    category = django_filters.CharFilter(field_name="category")
+    date_from = django_filters.DateFilter(field_name="service_date", lookup_expr="gte")
+    date_to = django_filters.DateFilter(field_name="service_date", lookup_expr="lte")
+    search = django_filters.CharFilter(method="filter_search")
 
     class Meta:
         model = RouteEvent
         fields = ["route_id", "event_type"]
+
+    def filter_occurrence(self, queryset, name, value):
+        types = RouteEvent.OCCURRENCE_TYPES
+        return queryset.filter(event_type__in=types) if value else queryset.exclude(event_type__in=types)
+
+    def filter_search(self, queryset, name, value):
+        value = value.strip()
+        if not value:
+            return queryset
+        return queryset.filter(
+            Q(route__name__icontains=value) | Q(description__icontains=value)
+            | Q(route__vehicle__plate_number__icontains=value) | Q(route__vehicle__driver__name__icontains=value)
+        )
 
 
 class RoutePassengerFilter(django_filters.FilterSet):

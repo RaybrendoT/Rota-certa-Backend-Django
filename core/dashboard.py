@@ -39,6 +39,7 @@ from .models import (
     Schedule,
     VehicleLocation,
 )
+from .occurrences import detect as detect_occurrences
 from .permissions import IsManager
 from .realtime_serializers import location_payload
 
@@ -82,19 +83,22 @@ def dashboard_summary(company, day: date, schedule_id: int | None = None) -> dic
     route_ids = [route.id for route in routes]
 
     departures, arrivals = {}, {}
-    delays = incidents = 0
+    delays = incidents = open_occurrences = 0
+    # Ocorrências contam todas as do dia (motorista, gestor e as detectadas pelo sistema).
     events = RouteEvent.objects.filter(
         route_id__in=route_ids, is_active=True, timestamp__gte=start, timestamp__lt=end
-    ).values_list("route_id", "event_type", "timestamp")
-    for route_id, event_type, timestamp in events:
+    ).values_list("route_id", "event_type", "timestamp", "status")
+    for route_id, event_type, timestamp, event_status in events:
         if event_type == "departure":
             departures.setdefault(route_id, timestamp)
         elif event_type == "arrival":
             arrivals[route_id] = max(arrivals.get(route_id, timestamp), timestamp)
-        elif event_type == "delay":
-            delays += 1
-        elif event_type == "incident":
-            incidents += 1
+        elif event_type in RouteEvent.OCCURRENCE_TYPES:
+            if event_type == "delay":
+                delays += 1
+            else:
+                incidents += 1
+            open_occurrences += event_status != RouteEvent.Status.RESOLVED
 
     passengers_by_route = {route_id: {"expected": 0, "confirmed": 0, "absent": 0} for route_id in route_ids}
     passenger_ids = {}
@@ -169,7 +173,7 @@ def dashboard_summary(company, day: date, schedule_id: int | None = None) -> dic
             "absent": absent,
             "pending": expected - confirmed - absent,
         },
-        "events": {"delays": delays, "incidents": incidents},
+        "events": {"delays": delays, "incidents": incidents, "open": open_occurrences},
         "occupancy": {"seats": seats, "passengers": seated, "rate": _rate(seated, seats)},
         "punctuality": {
             "finished": on_time + late,
@@ -209,16 +213,20 @@ class DashboardSummaryView(APIView):
         query = DashboardSummaryQuery(data=request.query_params)
         query.is_valid(raise_exception=True)
         day = query.validated_data.get("date") or local_today()
-        return Response(dashboard_summary(request.user.person.company, day, query.validated_data.get("schedule")))
+        company = request.user.person.company
+        if day == local_today():
+            detect_occurrences(company)
+        return Response(dashboard_summary(company, day, query.validated_data.get("schedule")))
 
 
 # ---------------------------------------------------------------------------
 # Alertas: GET dashboard/alerts/?date=AAAA-MM-DD — o que pede ação do gestor no dia.
 #
 # - address_reviews: endereços enviados pelos colaboradores aguardando aprovação (não depende do dia);
-# - incidents: incidentes registrados nas rotas do dia;
-# - delays: rotas com atraso registrado e, só no dia de hoje, rotas que passaram do horário do
-#   turno (mais a tolerância) sem chegada registrada;
+# - incidents: incidentes ainda não resolvidos nas rotas do dia;
+# - delays: atrasos ainda não resolvidos (do motorista, do gestor ou detectados pelo sistema; ver
+#   core/occurrences.py) e, só no dia de hoje, rotas que passaram do horário do turno (mais a
+#   tolerância) sem chegada nem ocorrência registrada;
 # - unassigned: rotas do dia sem veículo ou com veículo sem motorista.
 # Cada grupo traz o total e todos os itens (o painel mostra os primeiros e expande o resto).
 # ---------------------------------------------------------------------------
@@ -249,31 +257,40 @@ def dashboard_alerts(company, day: date, now=None, schedule_id: int | None = Non
             event_type__in=("arrival", "delay", "incident"),
         )
         .order_by("timestamp", "id")
-        .values_list("id", "route_id", "event_type", "description", "timestamp")
+        .values_list("id", "route_id", "event_type", "description", "timestamp", "status", "auto_code", "source")
     )
-    arrived, delayed, incident_items = set(), {}, []
-    for event_id, route_id, event_type, description, timestamp in events:
+    arrived, delayed, any_delay, incident_items = set(), {}, set(), []
+    for event_id, route_id, event_type, description, timestamp, event_status, auto_code, source in events:
         if event_type == "arrival":
             arrived.add(route_id)
-        elif event_type == "delay":
-            delayed.setdefault(route_id, (timestamp, description))
+            continue
+        if event_type == "delay":
+            any_delay.add(route_id)
+        if event_status == RouteEvent.Status.RESOLVED:
+            continue
+        if event_type == "delay":
+            delayed.setdefault(route_id, (event_id, timestamp, description, auto_code, source, event_status))
         else:
             incident_items.append({
                 "id": event_id, "route_id": route_id, "route_name": by_id[route_id].name,
-                "time": _hhmm(timestamp, tz), "description": description,
+                "time": _hhmm(timestamp, tz), "description": description, "source": source, "status": event_status,
             })
 
     delay_items = [
         {
-            "route_id": route_id, "route_name": by_id[route_id].name, "reason": "reported",
-            "time": _hhmm(timestamp, tz), "description": description,
+            "id": event_id, "route_id": route_id, "route_name": by_id[route_id].name,
+            # not_started / overdue / late_arrival (sistema) ou reported (motorista ou gestor).
+            "reason": auto_code or "reported",
+            "time": by_id[route_id].schedule.time.strftime("%H:%M") if auto_code and by_id[route_id].schedule_id
+            else _hhmm(timestamp, tz),
+            "description": description, "source": source, "status": event_status,
         }
-        for route_id, (timestamp, description) in delayed.items()
+        for route_id, (event_id, timestamp, description, auto_code, source, event_status) in delayed.items()
     ]
     if day == now.date():
         overdue = []
         for route in routes:
-            if route.id in arrived or route.id in delayed or not route.schedule_id:
+            if route.id in arrived or route.id in any_delay or not route.schedule_id:
                 continue
             deadline = datetime.combine(day, route.schedule.time, tzinfo=tz) + timedelta(
                 minutes=ON_TIME_TOLERANCE_MINUTES
@@ -322,9 +339,10 @@ class DashboardAlertsView(APIView):
         query = DashboardSummaryQuery(data=request.query_params)
         query.is_valid(raise_exception=True)
         day = query.validated_data.get("date") or local_today()
-        return Response(
-            dashboard_alerts(request.user.person.company, day, schedule_id=query.validated_data.get("schedule"))
-        )
+        company = request.user.person.company
+        if day == local_today():
+            detect_occurrences(company)
+        return Response(dashboard_alerts(company, day, schedule_id=query.validated_data.get("schedule")))
 
 
 # ---------------------------------------------------------------------------

@@ -74,7 +74,8 @@ class DashboardSummaryTests(DashboardTestCase):
         self.assertEqual(data["routes"], {
             "total": 3, "not_started": 1, "in_progress": 0, "finished": 2, "without_vehicle": 0,
         })
-        self.assertEqual(data["events"], {"delays": 1, "incidents": 0})
+        # O atraso de uma rota já finalizada continua aberto até o gestor resolver.
+        self.assertEqual(data["events"], {"delays": 1, "incidents": 0, "open": 1})
         self.assertEqual(data["punctuality"]["on_time"], 1)
         self.assertEqual(data["punctuality"]["late"], 1)
         self.assertEqual(data["punctuality"]["rate"], 0.5)
