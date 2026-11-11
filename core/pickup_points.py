@@ -10,6 +10,7 @@ Pontos de embarque e demanda com H3 (grade hexagonal da Uber, https://github.com
 
 Só leitura: criar o ponto sugerido é decisão do gestor (cadastro de pontos de encontro).
 """
+import math
 from dataclasses import dataclass
 
 import h3
@@ -57,6 +58,14 @@ def meeting_point_coords(company):
         (float(mp.address.latitude), float(mp.address.longitude))
         for mp in MeetingPoint.objects.filter(company=company, is_active=True, home_of__isnull=True).select_related("address")
     ]
+
+
+def _average_meters(distances):
+    """Média arredondada em metros, ou None quando alguma distância é infinita (empresa sem pontos)."""
+    values = list(distances)
+    if not values or any(math.isinf(v) for v in values):
+        return None
+    return round(sum(values) / len(values))
 
 
 def nearest_distance(lat, lng, points):
@@ -116,7 +125,8 @@ def suggest_pickup_points(
             "people": len(members),
             "person_ids": [h.person.id for h in members],
             "names": [h.person.name for h in members],
-            "avg_distance_now_m": round(sum(distance_now[id(h)] for h in members) / len(members)),
+            # Sem nenhum ponto cadastrado a distância atual é infinita: vai como None (round(inf) quebrava).
+            "avg_distance_now_m": _average_meters(distance_now[id(h)] for h in members),
             "avg_distance_after_m": round(sum(after) / len(after)),
             "address": _address_of(lat, lng) if with_address else None,
         })

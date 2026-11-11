@@ -471,9 +471,16 @@ class RouteViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
 
 
 class ScheduleViewSet(CompanyScopedQuerySetMixin, BaseViewSet):
-    queryset = Schedule.objects.select_related("company")
+    queryset = Schedule.objects.select_related("company").order_by("time", "id")
     serializer_class = ScheduleSerializer
     filterset_class = ScheduleFilter
+
+    def active_only(self):
+        # Lista: só ativos, a menos que o filtro peça ?status=inactive ou ?status=all (ScheduleFilter).
+        # Detalhe/edição: inativos também, para abrir e reativar o turno pela lista.
+        if self.action == "list":
+            return self.request.query_params.get("status") not in ("inactive", "all")
+        return False
 
 
 class AddressViewSet(BaseViewSet):

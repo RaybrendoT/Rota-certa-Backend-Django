@@ -108,3 +108,24 @@ class PickupApiTests(PickupPointsBase):
         foreign = Schedule.objects.create(company=self.other_company, weekdays=["MON"], time=time(7, 0))
         self.assertEqual(client.get(f"/api/demand-map/?schedule={foreign.pk}").status_code, 400)
         self.assertEqual(self.client_for(self.driver_person).get("/api/pickup-suggestions/").status_code, 403)
+
+
+@mock.patch("core.pickup_points.reverse_geocode", return_value=GEOCODED)
+class NoMeetingPointsTests(PickupPointsBase):
+    """Empresa recém-importada, sem nenhum ponto de encontro: a sugestão funciona (antes dava erro interno)."""
+
+    def setUp(self):
+        super().setUp()
+        MeetingPoint.objects.filter(company=self.company).delete()
+
+    def test_sugere_pontos_sem_distancia_atual(self, _geocode):
+        result = suggest_pickup_points(self.company)
+        self.assertEqual(result["covered"], 0)
+        self.assertGreaterEqual(len(result["suggestions"]), 1)
+        for suggestion in result["suggestions"]:
+            self.assertIsNone(suggestion["avg_distance_now_m"])
+            self.assertIsInstance(suggestion["avg_distance_after_m"], int)
+
+    def test_ferramenta_do_assistente_tambem_funciona(self, _geocode):
+        conversation = PlanningConversation.objects.create(created_by=self.manager_person, company=self.company)
+        self.assertGreaterEqual(len(Planner(conversation).suggest_pickup_points(None)["suggestions"]), 1)
